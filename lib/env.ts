@@ -7,7 +7,10 @@ const EnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(""),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
+  /** Model for chat/summarize (canned + freeform narratives). Sonnet default — better prose. */
   ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  /** Model for Top Insights narration (runs at upload import). Haiku default — cheap + fast for structured JSON. */
+  ANTHROPIC_MODEL_INSIGHTS: z.string().default("claude-haiku-4-5-20251001"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

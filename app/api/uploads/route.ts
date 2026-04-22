@@ -20,8 +20,6 @@ const MappingSchema = z.record(z.enum(CANONICAL_FIELDS), z.string().min(1));
 const MetaSchema = z.object({
   mapping: MappingSchema,
   targetMargin: z.number().min(0).max(1).default(0.3),
-  mappingName: z.string().trim().min(1).max(80).default("Default mapping"),
-  saveAsDefault: z.boolean().default(false),
 });
 
 export async function POST(request: NextRequest) {
@@ -101,27 +99,10 @@ export async function POST(request: NextRequest) {
       await db.job.createMany({ data: batch });
     }
 
-    let mappingId: string | null = null;
-    if (meta.saveAsDefault) {
-      await db.columnMapping.updateMany({
-        where: { companyId: ctx.companyId, isDefault: true },
-        data: { isDefault: false },
-      });
-      const saved = await db.columnMapping.create({
-        data: {
-          companyId: ctx.companyId,
-          name: meta.mappingName,
-          mapping: mapping as Prisma.InputJsonValue,
-          isDefault: true,
-        },
-      });
-      mappingId = saved.id;
-    }
-
     // Flip the upload to READY first so computeMetrics({ uploadId: "all" }) sees it.
     await db.upload.update({
       where: { id: upload.id },
-      data: { status: "READY", mappingId },
+      data: { status: "READY" },
     });
 
     // Two AI narrations in parallel (per-upload + all-aggregate).

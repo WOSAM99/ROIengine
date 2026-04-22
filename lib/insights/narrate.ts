@@ -19,15 +19,24 @@
  * Rules: .claude/rules/ai-safety-rules.md Rules 3, 6, 7.
  */
 
-import { getAnthropicClient, isAnthropicConfigured, extractUsage, logUsage } from "@/lib/anthropic";
+import {
+  getAnthropicClient,
+  isAnthropicConfigured,
+  extractUsage,
+  logUsage,
+  DEFAULT_INSIGHTS_MODEL,
+} from "@/lib/anthropic";
 import { logger } from "@/lib/logger";
 import type { Insight, InsightNarrative, Metrics } from "@/lib/metrics/types";
 
-const MODEL = "claude-haiku-4-5-20251001";
-// Raised from 600 → 1200 (2026-04-21): 600-token cap was being hit mid-string on
-// 3-insight payloads, causing JSON.parse to throw and every narrative to fail.
-// Output now has ~400 tokens per insight as a soft budget; hard cap is 1200.
-const MAX_TOKENS = 1200;
+// Model comes from the ANTHROPIC_MODEL_INSIGHTS env var. Falls back to
+// claude-haiku-4-5-20251001 if unset (cheap + fast for structured JSON narration).
+const MODEL = DEFAULT_INSIGHTS_MODEL;
+// Raised from 1200 → 1800 (2026-04-21): now 4–5 recommendations per insight
+// (was 1–2), so each narrative object is ~2–3× larger. 1800 gives ~360 tokens
+// per insight at 5 insights — comfortable margin over real output (~200 tokens
+// per insight with tightened word caps).
+const MAX_TOKENS = 1800;
 
 const SYSTEM_PROMPT = `You are a CFO-grade financial analyst writing for owners of service businesses (restoration, construction, cleaning). Input:
 - A company-level aggregated metrics snapshot (revenue, margin, cash collection).
@@ -36,7 +45,7 @@ const SYSTEM_PROMPT = `You are a CFO-grade financial analyst writing for owners 
 For EACH insight, produce THREE fields — keep every field TIGHT:
 1. "explanation" — ONE sentence, ≤ 20 words. State what the number means for the business. Mention the specific dimension (type / PM / aging bucket). Do NOT restate numbers already in the insight's "detail" field.
 2. "rootCause" — ONE sentence, ≤ 15 words. Name the single most likely cause (e.g. "Underbid water jobs", "Scope creep on cleaning work", "Slow invoicing on 31-60 bucket"). Specific, not generic.
-3. "recommendations" — array of 1 or 2 actions. Each action ≤ 15 words, starts with a verb, executable this week (e.g. "Review last 5 water quotes for scope vs actual hours"). No platitudes, no "consider", no "review and analyse".
+3. "recommendations" — array of EXACTLY 4 to 5 actions. Each action ≤ 15 words, starts with a verb, executable this week (e.g. "Review last 5 water quotes for scope vs actual hours", "Move 31-60 invoices to a weekly collection call"). Mix short-horizon tactical moves with one medium-horizon process fix. Order from highest-leverage to lowest. No platitudes, no "consider", no "review and analyse".
 
 Severity drives tone:
 - critical → direct, urgent, loss-of-cash framing.
@@ -264,7 +273,7 @@ function parseNarratives(rawText: string, insights: Insight[]): NarrativeMap {
 
     const recs = e.recommendations
       .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
-      .slice(0, 3);
+      .slice(0, 5);
     if (recs.length === 0) continue;
 
     map[e.id] = {

@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
-import { MappingsList } from "@/components/settings/mappings-list";
+import { TargetMarginForm } from "@/components/settings/target-margin-form";
 
 export const metadata = {
   title: "Settings · ROI Dashboard",
@@ -12,30 +12,21 @@ export const metadata = {
 
 export default async function SettingsPage() {
   const ctx = await requireCompany();
-  const mappings = await db.columnMapping.findMany({
-    where: { companyId: ctx.companyId },
-    orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
-    select: { id: true, name: true, isDefault: true, mapping: true, createdAt: true },
-    take: 20,
-  });
 
-  const mappingSummaries = mappings.map((m) => {
-    const obj = (m.mapping as Record<string, string> | null) ?? {};
-    return {
-      id: m.id,
-      name: m.name,
-      isDefault: m.isDefault,
-      fieldCount: Object.keys(obj).length,
-      createdAt: m.createdAt,
-    };
-  });
+  // Company default target margin. Field added in migration 20260422140000.
+  // Cast until the generated Prisma client catches up.
+  const company = (await db.company.findUnique({
+    where: { id: ctx.companyId },
+  })) as ({ defaultTargetMargin?: unknown } & { id: string }) | null;
+
+  const currentDefaultTargetMargin = parseDefaultTargetMargin(company?.defaultTargetMargin);
 
   return (
     <section className="space-y-8">
       <PageHeader
         eyebrow="Workspace"
         title="Settings"
-        description="Manage your account credentials and reusable column mappings."
+        description="Manage your account credentials and workspace defaults."
       />
 
       <Card>
@@ -56,16 +47,23 @@ export default async function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Column mappings</CardTitle>
+          <CardTitle>Workspace defaults</CardTitle>
           <CardDescription>
-            Saved mappings are reused automatically when you upload files that share the same
-            headers.
+            Values applied to every new upload unless overridden at import time.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <MappingsList mappings={mappingSummaries} />
+          <TargetMarginForm initialTargetMargin={currentDefaultTargetMargin} />
         </CardContent>
       </Card>
     </section>
   );
+}
+
+function parseDefaultTargetMargin(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const str = typeof raw === "string" ? raw : (raw as { toString(): string }).toString();
+  const n = Number(str);
+  if (!Number.isFinite(n) || n < 0 || n > 1) return null;
+  return n;
 }

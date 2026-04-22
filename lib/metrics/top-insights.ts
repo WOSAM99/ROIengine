@@ -77,6 +77,19 @@ const URGENCY: Record<InsightSeverity, number> = {
   medium: 1,
 };
 
+/**
+ * Severity tiers as strict rank — higher number always wins over lower.
+ * Any `critical` beats any `high` beats any `medium`, regardless of raw impact.
+ * Impact only tie-breaks within the same tier.
+ * User directive 2026-04-21: "first card will be the most important point need
+ * to check. high severity".
+ */
+const SEVERITY_RANK: Record<InsightSeverity, number> = {
+  critical: 3,
+  high: 2,
+  medium: 1,
+};
+
 export function computeTopInsights({
   jobs,
   targetMarginFraction,
@@ -173,11 +186,13 @@ export function computeTopInsights({
     });
   }
 
-  // Rank by (impact × urgency) — cash-flow and critical-severity leaks bubble up.
+  // Rank by severity tier first (critical > high > medium), then by raw impact
+  // within the same tier. Keeps `urgencyWeight` around in the Candidate shape
+  // for any future analytics, but it's no longer a ranking input.
   candidates.sort((a, b) => {
-    const aScore = Number(a.impact.toString()) * a.urgencyWeight;
-    const bScore = Number(b.impact.toString()) * b.urgencyWeight;
-    return bScore - aScore;
+    const tierDiff = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
+    if (tierDiff !== 0) return tierDiff;
+    return Number(b.impact.toString()) - Number(a.impact.toString());
   });
 
   const items: Insight[] = candidates.slice(0, INSIGHT_LIMIT).map((c) => ({

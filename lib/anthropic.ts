@@ -26,6 +26,11 @@ export function getAnthropicClient(): Anthropic {
 
 export const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
+/** Model for Top Insights narration. Separate env var so insights stay cheap on Haiku
+ *  while chat/summarize stays on Sonnet for better prose quality. */
+export const DEFAULT_INSIGHTS_MODEL =
+  process.env.ANTHROPIC_MODEL_INSIGHTS ?? "claude-haiku-4-5-20251001";
+
 export type AnthropicUsage = {
   inputTokens: number;
   outputTokens: number;

@@ -18,13 +18,12 @@ import type { ColumnMapping } from "@/lib/parse/types";
 const EYEBROW =
   "flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-accent-700";
 
-type Step = "upload" | "preview" | "map" | "confirm";
+type Step = "upload" | "preview" | "map";
 
 const STEPS: Array<{ key: Step; label: string }> = [
   { key: "upload", label: "Upload" },
   { key: "preview", label: "Preview" },
   { key: "map", label: "Map" },
-  { key: "confirm", label: "Confirm" },
 ];
 
 type PreviewData = {
@@ -35,18 +34,20 @@ type PreviewData = {
   preview: Record<string, unknown>[];
   suggestedMapping: ColumnMapping;
   unmappedHeaders: string[];
-  defaultMappingName: string | null;
 };
 
-export function UploadWizard() {
+type UploadWizardProps = {
+  /** Company-wide default target margin (fraction 0..1), or 0.3 fallback if not set. */
+  defaultTargetMargin: number;
+};
+
+export function UploadWizard({ defaultTargetMargin }: UploadWizardProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping>({});
-  const [mappingName, setMappingName] = useState("Default mapping");
-  const [saveAsDefault, setSaveAsDefault] = useState(true);
-  const [targetMargin, setTargetMargin] = useState(0.3);
+  const [targetMargin, setTargetMargin] = useState(defaultTargetMargin);
   const [isBusy, setIsBusy] = useState(false);
 
   const handleFileSelected = useCallback(async (picked: File) => {
@@ -64,7 +65,6 @@ export function UploadWizard() {
       }
       setPreview(body);
       setMapping(body.suggestedMapping);
-      setMappingName(body.defaultMappingName ?? "Default mapping");
       setStep("preview");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed");
@@ -73,7 +73,7 @@ export function UploadWizard() {
     }
   }, []);
 
-  async function handleConfirm() {
+  async function handleImport() {
     if (!file || !preview) return;
     const issues = validateMapping(mapping);
     if (issues.length > 0) {
@@ -84,15 +84,7 @@ export function UploadWizard() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append(
-        "meta",
-        JSON.stringify({
-          mapping,
-          targetMargin,
-          mappingName,
-          saveAsDefault,
-        }),
-      );
+      formData.append("meta", JSON.stringify({ mapping, targetMargin }));
       const res = await fetch("/api/uploads", { method: "POST", body: formData });
       const body = await res.json();
       if (!res.ok) {
@@ -163,7 +155,7 @@ export function UploadWizard() {
           <CardHeader>
             <CardTitle>Map columns</CardTitle>
             <CardDescription>
-              Confirm each canonical field points to the right source column.
+              Confirm each canonical field points to the right source column, then import.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -173,85 +165,47 @@ export function UploadWizard() {
               preview={preview.preview}
               onChange={setMapping}
             />
+
+            <div className="border-border/60 grid gap-4 border-t pt-5 sm:grid-cols-[1fr_auto] sm:items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="targetMargin" className={EYEBROW}>
+                  Target margin (this upload)
+                </Label>
+                <div className="relative max-w-[180px]">
+                  <Input
+                    id="targetMargin"
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="100"
+                    value={Math.round(targetMargin * 100)}
+                    onChange={(e) => {
+                      const pct = Number(e.target.value);
+                      if (!Number.isFinite(pct)) return;
+                      setTargetMargin(Math.max(0, Math.min(100, pct)) / 100);
+                    }}
+                    className={cn("pr-8 font-mono")}
+                  />
+                  <span
+                    aria-hidden
+                    className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm"
+                  >
+                    %
+                  </span>
+                </div>
+                <p className="text-muted-foreground text-[11px]">
+                  Jobs below this margin are flagged. Default from Settings; change here to override
+                  for this upload only.
+                </p>
+              </div>
+            </div>
+
             <div className="flex justify-between gap-2 pt-2">
               <Button variant="outline" onClick={() => setStep("preview")}>
                 <ArrowLeft className="size-4" />
                 Back
               </Button>
-              <Button variant="accent" onClick={() => setStep("confirm")}>
-                Continue
-                <ArrowRight className="size-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {step === "confirm" && preview && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Finalize</CardTitle>
-            <CardDescription>
-              Name this mapping and set the target margin used for profit-leak detection.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="space-y-1.5">
-              <Label htmlFor="mappingName" className={EYEBROW}>
-                Mapping name
-              </Label>
-              <Input
-                id="mappingName"
-                value={mappingName}
-                onChange={(e) => setMappingName(e.target.value)}
-                placeholder="Default mapping"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="targetMargin" className={EYEBROW}>
-                Target margin
-              </Label>
-              <div className="relative">
-                <Input
-                  id="targetMargin"
-                  type="number"
-                  step="1"
-                  min="0"
-                  max="100"
-                  value={Math.round(targetMargin * 100)}
-                  onChange={(e) => {
-                    const pct = Number(e.target.value);
-                    if (!Number.isFinite(pct)) return;
-                    setTargetMargin(Math.max(0, Math.min(100, pct)) / 100);
-                  }}
-                  className="pr-8 font-mono"
-                />
-                <span
-                  aria-hidden
-                  className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm"
-                >
-                  %
-                </span>
-              </div>
-              <p className="text-muted-foreground text-[11px]">
-                Jobs with a margin below this value are flagged as profit leaks.
-              </p>
-            </div>
-            <label className="flex cursor-pointer items-center gap-2.5 text-sm select-none">
-              <input
-                type="checkbox"
-                checked={saveAsDefault}
-                onChange={(e) => setSaveAsDefault(e.target.checked)}
-                className="accent-accent border-input size-4 rounded"
-              />
-              Save as default mapping for this workspace
-            </label>
-            <div className="flex justify-between gap-2 pt-2">
-              <Button variant="outline" onClick={() => setStep("map")}>
-                <ArrowLeft className="size-4" />
-                Back
-              </Button>
-              <Button variant="accent" size="lg" onClick={handleConfirm} disabled={isBusy}>
+              <Button variant="accent" size="lg" onClick={handleImport} disabled={isBusy}>
                 {isBusy ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />

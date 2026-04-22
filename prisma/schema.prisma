@@ -10,15 +10,17 @@ datasource db {
 }
 
 model Company {
-  id        String          @id @default(cuid())
+  id        String   @id @default(cuid())
   name      String
-  createdAt DateTime        @default(now())
+  createdAt DateTime @default(now())
   /// AI-generated narrative for the "All uploads" aggregate view. Recomputed at
   /// upload import and upload delete. Null when no uploads exist or call failed.
   allInsightsNarrative Json?
+  /// Company-wide default target margin (fraction 0–1). NULL means "use 30%
+  /// fallback". Per-upload `Upload.targetMargin` may override this at import time.
+  defaultTargetMargin  Decimal? @db.Decimal(5, 4)
   members   Membership[]
   uploads   Upload[]
-  mappings  ColumnMapping[]
   jobs      Job[]
 }
 
@@ -44,19 +46,6 @@ model Membership {
   @@index([companyId])
 }
 
-// Reusable header-to-canonical mapping per company.
-model ColumnMapping {
-  id        String  @id @default(cuid())
-  companyId String
-  name      String
-  mapping   Json
-  isDefault Boolean @default(false)
-  createdAt DateTime @default(now())
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@index([companyId])
-}
-
 enum UploadStatus {
   PROCESSING
   READY
@@ -73,7 +62,6 @@ model Upload {
   skippedRows  Int          @default(0)
   status       UploadStatus @default(PROCESSING)
   targetMargin Decimal      @default(0.30) @db.Decimal(5, 4)
-  mappingId    String?
   warnings     Json         @default("[]")
   errorMessage String?
   insightsNarrative Json?

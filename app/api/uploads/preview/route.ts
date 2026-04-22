@@ -1,15 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireCompany } from "@/lib/auth";
-import { db } from "@/lib/db";
 import { detectFormat, readFileBuffer, previewFromResult } from "@/lib/parse/read";
 import { suggestMapping, unmappedHeaders } from "@/lib/parse/mapper";
 import { validateFile } from "@/lib/parse/validate";
-import type { ColumnMapping } from "@/lib/parse/types";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // 4MB
 
 export async function POST(request: NextRequest) {
-  const ctx = await requireCompany();
+  await requireCompany();
 
   const formData = await request.formData();
   const file = formData.get("file");
@@ -39,12 +37,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: fileIssues[0].message }, { status: 422 });
   }
 
-  const defaultMapping = await db.columnMapping.findFirst({
-    where: { companyId: ctx.companyId, isDefault: true },
-  });
-  const savedMapping = (defaultMapping?.mapping as ColumnMapping | null) ?? undefined;
-
-  const suggested = suggestMapping({ headers: parsed.headers, savedMapping });
+  // Saved-mapping lookup removed 2026-04-22 along with the ColumnMapping table.
+  // Auto-suggestion now relies entirely on the synonym dictionary in lib/parse/synonyms.ts.
+  const suggested = suggestMapping({ headers: parsed.headers });
   const preview = previewFromResult(parsed, 5);
 
   return NextResponse.json({
@@ -55,6 +50,5 @@ export async function POST(request: NextRequest) {
     preview: preview.rows,
     suggestedMapping: suggested,
     unmappedHeaders: unmappedHeaders(parsed.headers, suggested),
-    defaultMappingName: defaultMapping?.name ?? null,
   });
 }
