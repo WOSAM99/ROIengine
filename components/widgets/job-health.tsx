@@ -69,7 +69,7 @@ export function JobHealthWidget({ data }: JobHealthWidgetProps) {
               <span className="inline-flex items-center gap-1.5">
                 <span
                   aria-hidden
-                  className="from-danger-500 to-danger-700 inline-block size-2.5 rounded-sm bg-gradient-to-b"
+                  className="from-accent-500 inline-block size-2.5 rounded-sm bg-gradient-to-b to-fuchsia-500 opacity-50"
                 />
                 Below target
               </span>
@@ -100,9 +100,8 @@ export function JobHealthWidget({ data }: JobHealthWidgetProps) {
                               aria-hidden
                               className={cn(
                                 "inline-block size-2.5 shrink-0 rounded-sm bg-gradient-to-b",
-                                isBelow
-                                  ? "from-danger-500 to-danger-700"
-                                  : "from-accent-500 to-fuchsia-500",
+                                "from-accent-500 to-fuchsia-500",
+                                isBelow && "opacity-50",
                               )}
                             />
                             <span className="break-words capitalize">{row.projectType}</span>
@@ -117,14 +116,14 @@ export function JobHealthWidget({ data }: JobHealthWidgetProps) {
                         <td
                           className={cn(
                             "font-numeric px-3 py-2.5 text-right whitespace-nowrap",
-                            isBelow ? "text-danger-700 font-semibold" : "text-success-700",
+                            isBelow ? "text-accent-700 font-semibold" : "text-success-700",
                           )}
                         >
                           {formatPct(row.marginPct)}
                         </td>
                         <td className="font-numeric px-3 py-2.5 text-right whitespace-nowrap">
                           {row.belowTargetCount > 0 ? (
-                            <span className="bg-danger-50 text-danger-700 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold">
+                            <span className="bg-accent-50 text-accent-700 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold">
                               {row.belowTargetCount}
                             </span>
                           ) : (
@@ -173,10 +172,11 @@ function RevenueBarChart({ chartData }: { chartData: ChartRow[] }) {
               <stop offset="0%" stopColor="var(--accent-500)" stopOpacity={0.95} />
               <stop offset="100%" stopColor="var(--fuchsia-500)" stopOpacity={0.85} />
             </linearGradient>
-            {/* Below-target: rose/red gradient. Semantic "losing margin" without the harsh yellow. */}
+            {/* Below-target: same primary gradient as on-target, but dimmed via opacity.
+                User directive 2026-04-21 — "lets use same primary gradient". */}
             <linearGradient id="grad-below-target" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--danger-500)" stopOpacity={0.95} />
-              <stop offset="100%" stopColor="var(--danger-700)" stopOpacity={0.8} />
+              <stop offset="0%" stopColor="var(--accent-500)" stopOpacity={0.45} />
+              <stop offset="100%" stopColor="var(--fuchsia-500)" stopOpacity={0.35} />
             </linearGradient>
           </defs>
           <CartesianGrid {...GRID_PROPS} />
@@ -224,7 +224,7 @@ function MarginGauge({
   const hitTarget = avgPct >= targetPct;
   // Stable gradient id per-gauge to avoid collisions if multiple MarginGauges
   // render on the same page (they share document-level SVG namespace).
-  const gradientId = `margin-gauge-gradient-${hitTarget ? "primary" : "danger"}`;
+  const gradientId = `margin-gauge-gradient-${hitTarget ? "primary" : "dimmed"}`;
   return (
     <div className="relative flex h-[52px] w-[52px] shrink-0 items-center justify-center">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
@@ -232,17 +232,9 @@ function MarginGauge({
           {/* Hit target → platform primary gradient (violet → fuchsia).
               Below target → warning amber — preserves the "watch" semantic. */}
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-            {hitTarget ? (
-              <>
-                <stop offset="0%" stopColor="var(--accent-500)" />
-                <stop offset="100%" stopColor="var(--fuchsia-500)" />
-              </>
-            ) : (
-              <>
-                <stop offset="0%" stopColor="var(--danger-500)" />
-                <stop offset="100%" stopColor="var(--danger-700)" />
-              </>
-            )}
+            {/* Both states use the platform primary gradient; below-target dims via opacity. */}
+            <stop offset="0%" stopColor="var(--accent-500)" stopOpacity={hitTarget ? 1 : 0.5} />
+            <stop offset="100%" stopColor="var(--fuchsia-500)" stopOpacity={hitTarget ? 1 : 0.4} />
           </linearGradient>
         </defs>
         <circle
