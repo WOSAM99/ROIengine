@@ -1,0 +1,291 @@
+/**
+ * Top Insights AI narration — fires at two triggers only:
+ *   1. Upload import (per-upload narrative + all-aggregate narrative, in parallel)
+ *   2. Upload delete (all-aggregate narrative re-run)
+ *
+ * User directive (2026-04-21): "do reload of data only when there new files uploaded."
+ * → No regeneration endpoint. No dashboard-view-triggered calls. If a call fails, the
+ *   narrative stays null for that scope (UI gracefully falls back to rule-based text).
+ *
+ * PRIVACY CONTRACT (user directive 2026-04-21 — "make sure to use summary data, do not
+ * send full raw data to ai in any case"):
+ *   - This function only accepts pre-aggregated `Metrics` + rule-computed `Insight[]`.
+ *   - Never accepts raw `MetricJob[]` or any row-level data structure.
+ *   - Never receives `jobId`, `clientName`, per-row `invoiceAmount` / `jobCost`, or raw dates.
+ *   - Every field in the outgoing user message is an aggregate (SUM, AVG, COUNT, or GROUP BY
+ *     output produced server-side by `lib/metrics/engine.ts`).
+ *
+ * Approval: AI_DOCS/memory/ai-cost-approvals.md → "Top Insights AI Narrative".
+ * Rules: .claude/rules/ai-safety-rules.md Rules 3, 6, 7.
+ */
+
+import { getAnthropicClient, isAnthropicConfigured, extractUsage, logUsage } from "@/lib/anthropic";
+import { logger } from "@/lib/logger";
+import type { Insight, InsightNarrative, Metrics } from "@/lib/metrics/types";
+
+const MODEL = "claude-haiku-4-5-20251001";
+// Raised from 600 → 1200 (2026-04-21): 600-token cap was being hit mid-string on
+// 3-insight payloads, causing JSON.parse to throw and every narrative to fail.
+// Output now has ~400 tokens per insight as a soft budget; hard cap is 1200.
+const MAX_TOKENS = 1200;
+
+const SYSTEM_PROMPT = `You are a CFO-grade financial analyst writing for owners of service businesses (restoration, construction, cleaning). Input:
+- A company-level aggregated metrics snapshot (revenue, margin, cash collection).
+- Up to 5 rule-computed "insights", each with a "severity" tag (critical | high | medium).
+
+For EACH insight, produce THREE fields — keep every field TIGHT:
+1. "explanation" — ONE sentence, ≤ 20 words. State what the number means for the business. Mention the specific dimension (type / PM / aging bucket). Do NOT restate numbers already in the insight's "detail" field.
+2. "rootCause" — ONE sentence, ≤ 15 words. Name the single most likely cause (e.g. "Underbid water jobs", "Scope creep on cleaning work", "Slow invoicing on 31-60 bucket"). Specific, not generic.
+3. "recommendations" — array of 1 or 2 actions. Each action ≤ 15 words, starts with a verb, executable this week (e.g. "Review last 5 water quotes for scope vs actual hours"). No platitudes, no "consider", no "review and analyse".
+
+Severity drives tone:
+- critical → direct, urgent, loss-of-cash framing.
+- high → straightforward priority framing.
+- medium → neutral, watch-list framing.
+
+STRICT RULES:
+- Output MUST be valid JSON, no markdown, no code fences, no trailing commentary.
+- Do NOT invent numbers — use only what appears in the input.
+- Do NOT quote currency symbols or raw numbers verbatim when the insight's "detail" already contains them.
+- If input text uses £, keep £. If $, keep $.
+
+Output STRICTLY this JSON shape:
+{"narratives":[{"id":"<insight.id>","explanation":"...","rootCause":"...","recommendations":["...","..."]}]}`;
+
+export type NarrateInput = {
+  insights: Insight[];
+  metrics: Pick<Metrics, "profitPulse" | "jobHealth" | "cashFlow" | "pmPerformance">;
+};
+
+/** Map of insight.id → narrative. Empty object when skipped / failed. */
+export type NarrativeMap = Record<string, InsightNarrative>;
+
+/**
+ * Generate narratives for the given insights. Fail-silent: on any error path
+ * (missing key, API error, malformed JSON), returns an empty map and logs.
+ * Caller persists whatever map comes back — empty or populated — once.
+ */
+const FEATURE = "top-insights-narrate";
+
+export async function narrateInsights(input: NarrateInput): Promise<NarrativeMap> {
+  if (input.insights.length === 0) {
+    logger.info(`${FEATURE} skipped: no insights to narrate`);
+    return {};
+  }
+
+  if (!isAnthropicConfigured()) {
+    logger.warn(`${FEATURE} skipped — ANTHROPIC_API_KEY not set`, {
+      feature: FEATURE,
+      insight_count: input.insights.length,
+    });
+    return {};
+  }
+
+  const client = getAnthropicClient();
+  const userMessage = buildUserMessage(input);
+
+  logger.info(`${FEATURE} → calling Anthropic`, {
+    feature: FEATURE,
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    insight_count: input.insights.length,
+    user_message_chars: userMessage.length,
+    system_prompt_chars: SYSTEM_PROMPT.length,
+  });
+
+  const started = Date.now();
+
+  try {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      temperature: 0.2,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    const latencyMs = Date.now() - started;
+    const usage = extractUsage(response.usage);
+
+    // Token usage (required by ai-safety-rules.md Rule 6).
+    logUsage(FEATURE, usage, response.model);
+
+    const text = extractText(response.content);
+    logger.info(`${FEATURE} ← response`, {
+      feature: FEATURE,
+      model: response.model,
+      stop_reason: response.stop_reason,
+      latency_ms: latencyMs,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_input_tokens: usage.cacheReadTokens,
+      cache_creation_input_tokens: usage.cacheCreationTokens,
+      response_chars: text?.length ?? 0,
+    });
+
+    if (!text) {
+      logger.warn(`${FEATURE}: empty content`, { feature: FEATURE, latency_ms: latencyMs });
+      return {};
+    }
+
+    return parseNarratives(text, input.insights);
+  } catch (error) {
+    const latencyMs = Date.now() - started;
+    logger.error(`${FEATURE} failed`, {
+      feature: FEATURE,
+      latency_ms: latencyMs,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {};
+  }
+}
+
+const TOP_N = 5;
+
+function buildUserMessage({ insights, metrics }: NarrateInput): string {
+  // Every field below is an aggregate. Per the privacy contract at the top of this file,
+  // no row-level data is included.
+  const compactInsights = insights.map((i) => ({
+    id: i.id,
+    dimension: i.dimension,
+    severity: i.severity,
+    title: i.title,
+    rule: i.rule,
+    detail: i.detail,
+    estimatedImpact: i.estimatedImpact,
+  }));
+
+  // Multi-query-derived aggregates (user directive 2026-04-21):
+  //   "you can have multiple queries to get results and use that to send to ai".
+  // All of these are already computed server-side by metrics/engine.ts.
+  const topJobTypes = [...metrics.jobHealth.rows]
+    .sort((a, b) => Number(b.revenue) - Number(a.revenue))
+    .slice(0, TOP_N)
+    .map((r) => ({
+      projectType: r.projectType,
+      jobCount: r.jobCount,
+      revenue: r.revenue,
+      marginPct: r.marginPct,
+      belowTargetCount: r.belowTargetCount,
+      avgCycleDays: r.avgCycleDays,
+    }));
+
+  const topPms = [...metrics.pmPerformance.rows]
+    .sort((a, b) => Number(b.revenue) - Number(a.revenue))
+    .slice(0, TOP_N)
+    .map((r) => ({
+      pm: r.pm,
+      jobCount: r.jobCount,
+      revenue: r.revenue,
+      marginPct: r.marginPct,
+      variancePct: r.variancePct,
+    }));
+
+  const arByBucket = metrics.cashFlow.buckets.map((b) => ({
+    bucket: b.bucket,
+    count: b.count,
+    amount: b.amount,
+  }));
+
+  const context = {
+    company: {
+      totalRevenue: metrics.profitPulse.totalRevenue,
+      totalCost: metrics.profitPulse.totalCost,
+      grossProfit: metrics.profitPulse.grossProfit,
+      grossMarginPct: metrics.profitPulse.grossMarginPct,
+      totalJobs: metrics.profitPulse.totalJobs,
+      revenuePerJob: metrics.profitPulse.revenuePerJob,
+      targetMarginPct: metrics.jobHealth.targetMarginPct,
+      avgMarginPct: metrics.jobHealth.avgMarginPct,
+      lowMarginJobCount: metrics.jobHealth.lowMarginJobCount,
+      companyAvgPmMarginPct: metrics.pmPerformance.companyAvgMarginPct,
+      cashCollected: metrics.cashFlow.cashCollected,
+      totalBilled: metrics.cashFlow.totalBilled,
+      outstanding: metrics.cashFlow.outstanding,
+      collectionGap: metrics.cashFlow.collectionGap,
+      collectionEfficiencyPct: metrics.cashFlow.collectionEfficiencyPct,
+      arOver30: metrics.cashFlow.arOver30,
+      arRiskPct: metrics.cashFlow.arRiskPct,
+    },
+    jobTypeAggregates: topJobTypes,
+    pmAggregates: topPms,
+    arBucketAggregates: arByBucket,
+    insights: compactInsights,
+  };
+
+  return `Aggregated snapshot + rule-computed insights (NO raw job rows — aggregates only):\n\n${JSON.stringify(context, null, 2)}\n\nReturn the JSON object described in the system prompt. ${compactInsights.length} narrative object(s) expected — one per insight id.`;
+}
+
+type AnthropicContentBlock = { type: string; text?: string };
+
+function extractText(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const blocks = content as AnthropicContentBlock[];
+  const chunks = blocks
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text ?? "");
+  const joined = chunks.join("").trim();
+  return joined.length > 0 ? joined : null;
+}
+
+function parseNarratives(rawText: string, insights: Insight[]): NarrativeMap {
+  const jsonText = stripFences(rawText);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    logger.warn("Top Insights narrate: invalid JSON from model", {
+      error: error instanceof Error ? error.message : String(error),
+      preview: jsonText.slice(0, 200),
+    });
+    return {};
+  }
+
+  if (!parsed || typeof parsed !== "object") return {};
+  const obj = parsed as { narratives?: unknown };
+  if (!Array.isArray(obj.narratives)) return {};
+
+  const validIds = new Set(insights.map((i) => i.id));
+  const map: NarrativeMap = {};
+
+  for (const entry of obj.narratives) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as {
+      id?: unknown;
+      explanation?: unknown;
+      rootCause?: unknown;
+      recommendations?: unknown;
+    };
+    if (typeof e.id !== "string" || !validIds.has(e.id)) continue;
+    if (typeof e.explanation !== "string" || e.explanation.length === 0) continue;
+    if (typeof e.rootCause !== "string" || e.rootCause.length === 0) continue;
+    if (!Array.isArray(e.recommendations)) continue;
+
+    const recs = e.recommendations
+      .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
+      .slice(0, 3);
+    if (recs.length === 0) continue;
+
+    map[e.id] = {
+      explanation: e.explanation.trim(),
+      rootCause: e.rootCause.trim(),
+      recommendations: recs,
+    };
+  }
+
+  return map;
+}
+
+function stripFences(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("```")) {
+    const firstNewline = trimmed.indexOf("\n");
+    if (firstNewline !== -1) {
+      const withoutHead = trimmed.slice(firstNewline + 1);
+      const endFence = withoutHead.lastIndexOf("```");
+      return endFence === -1 ? withoutHead : withoutHead.slice(0, endFence).trim();
+    }
+  }
+  return trimmed;
+}

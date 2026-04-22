@@ -1,0 +1,155 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Company {
+  id        String          @id @default(cuid())
+  name      String
+  createdAt DateTime        @default(now())
+  /// AI-generated narrative for the "All uploads" aggregate view. Recomputed at
+  /// upload import and upload delete. Null when no uploads exist or call failed.
+  allInsightsNarrative Json?
+  members   Membership[]
+  uploads   Upload[]
+  mappings  ColumnMapping[]
+  jobs      Job[]
+}
+
+// Mirror of auth.users from Supabase. Kept in sync by a Postgres trigger
+// defined in supabase/migrations/0001_profile_trigger.sql.
+model Profile {
+  id          String       @id
+  email       String       @unique
+  fullName    String?
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+}
+
+model Membership {
+  id        String  @id @default(cuid())
+  profileId String
+  companyId String
+  role      String  @default("member")
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, companyId])
+  @@index([companyId])
+}
+
+// Reusable header-to-canonical mapping per company.
+model ColumnMapping {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  mapping   Json
+  isDefault Boolean @default(false)
+  createdAt DateTime @default(now())
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+enum UploadStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Upload {
+  id           String       @id @default(cuid())
+  companyId    String
+  uploadedBy   String
+  filename     String
+  storagePath  String
+  rowCount     Int          @default(0)
+  skippedRows  Int          @default(0)
+  status       UploadStatus @default(PROCESSING)
+  targetMargin Decimal      @default(0.30) @db.Decimal(5, 4)
+  mappingId    String?
+  warnings     Json         @default("[]")
+  errorMessage String?
+  insightsNarrative Json?
+  uploadedAt   DateTime     @default(now())
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  jobs         Job[]
+  chatMessages ChatMessage[]
+
+  @@index([companyId, uploadedAt])
+}
+
+enum JobType {
+  water
+  mold
+  fire
+  recon
+  cleaning
+  other
+}
+
+enum JobStatus {
+  active
+  in_progress
+  on_hold
+  delayed
+  waiting
+  completed
+  cancelled
+  unknown
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  companyId      String
+  uploadId       String
+  jobId          String
+  clientName     String?
+  projectType    JobType?
+  status         JobStatus?
+  projectManager String?
+  invoiceAmount  Decimal   @db.Decimal(14, 2)
+  jobCost        Decimal   @db.Decimal(14, 2)
+  cashReceived   Decimal   @default(0) @db.Decimal(14, 2)
+  balanceDue     Decimal   @default(0) @db.Decimal(14, 2)
+  laborHours     Decimal?  @db.Decimal(10, 2)
+  arBucket       String?
+  startDate      DateTime?
+  finishDate     DateTime?
+  raw            Json
+  createdAt      DateTime  @default(now())
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  upload         Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, uploadId])
+  @@index([companyId, projectType])
+  @@index([companyId, projectManager])
+  @@index([companyId, arBucket])
+}
+
+model ChatMessage {
+  id                  String   @id @default(cuid())
+  companyId           String
+  profileId           String
+  uploadId            String?
+  question            String
+  questionKey         String
+  sqlRan              String
+  rows                Json
+  summary             String
+  model               String
+  inputTokens         Int      @default(0)
+  outputTokens        Int      @default(0)
+  cacheReadTokens     Int      @default(0)
+  cacheCreationTokens Int      @default(0)
+  createdAt           DateTime @default(now())
+  upload              Upload?  @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+}
