@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireCompany } from "@/lib/auth";
 import { computeExtendedMetrics, ALL_UPLOADS } from "@/lib/metrics/engine";
+import { ensureScopeNarrative } from "@/lib/insights/ensure-narrative";
 import { db } from "@/lib/db";
 import { ProfitPulseWidget } from "@/components/widgets/profit-pulse";
 import { JobHealthWidget } from "@/components/widgets/job-health";
@@ -78,10 +79,16 @@ async function DashboardContent({
   companyId: string;
 }) {
   const isAllView = selectedUploadId === ALL_UPLOADS_VALUE;
+  const scopeUploadId = isAllView ? ALL_UPLOADS : selectedUploadId;
+
+  // Backfill the AI narrative for old data that predates the feature (stored value
+  // is NULL). Runs at most once per scope, then never again. No-op when the
+  // narrative already exists or no API key is configured. See ensure-narrative.ts.
+  await ensureScopeNarrative({ companyId, uploadId: scopeUploadId });
 
   const metrics = await computeExtendedMetrics({
     companyId,
-    uploadId: isAllView ? ALL_UPLOADS : selectedUploadId,
+    uploadId: scopeUploadId,
   });
 
   const activeUpload = isAllView
@@ -139,10 +146,8 @@ async function DashboardContent({
             <JobHealthWidget data={metrics.jobHealth} />
             <CashFlowWidget data={metrics.cashFlow} />
           </div>
-          <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
-            <TopInsightsWidget data={metrics.topInsights} />
-            <WeeklyPrioritiesWidget data={metrics.weeklyPriorities} />
-          </div>
+          <TopInsightsWidget data={metrics.topInsights} />
+          <WeeklyPrioritiesWidget data={metrics.weeklyPriorities} />
         </>
       ) : (
         <Card>
