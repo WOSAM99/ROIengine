@@ -10,6 +10,7 @@ import { CANONICAL_FIELDS, type ColumnMapping, type NormalizedJob } from "@/lib/
 import { logger } from "@/lib/logger";
 import { buildUploadNarrative } from "@/lib/insights/build-upload-narrative";
 import { refreshAllUploadsNarrative } from "@/lib/insights/aggregate-narrative";
+import { attachMeta } from "@/lib/insights/narrative-meta";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const INSERT_BATCH = 500;
@@ -117,8 +118,13 @@ export async function POST(request: NextRequest) {
         where: { id: upload.id },
         data: {
           // Field added in migration 20260421120000. Cast until generated types catch up.
+          // attachMeta records status + attempt count so backfill-on-view never re-calls.
           ...({
-            insightsNarrative: perUploadNarrative as Prisma.InputJsonValue,
+            insightsNarrative: attachMeta(
+              perUploadNarrative.map,
+              perUploadNarrative.status,
+              1,
+            ) as Prisma.InputJsonValue,
           } as Prisma.UploadUpdateInput),
         },
       });

@@ -6,71 +6,31 @@
  *
  * Shared by:
  *   - Upload import (POST /api/uploads) — generates at import time.
- *   - Backfill-on-view (lib/insights/ensure-narrative.ts) — generates once for
- *     old uploads whose `insightsNarrative` is still NULL.
+ *   - Backfill-on-view (lib/insights/ensure-narrative.ts) — generates for old
+ *     uploads whose `insightsNarrative` is missing or previously failed.
  *
- * Returns the merged map (possibly an empty `{}` when there is nothing to
- * narrate), or `null` only on a catastrophic compute failure. A non-null `{}`
- * is intentionally meaningful: the caller persists it so the scope counts as
- * "narration attempted" and is never re-narrated.
- *
- * Individual narration failures are catch-and-continue — fail-silent per
- * lib/insights/narrate.ts. Privacy contract (aggregates only) is enforced by
- * the individual narrate functions.
+ * Returns `{ status, map }` (see narrate-all.ts for the status meaning) or
+ * `null` only on a catastrophic compute failure (metrics could not be computed).
+ * The caller attaches the `__meta__` marker (attachMeta) and persists.
  */
 
 import { computeMetrics } from "@/lib/metrics/engine";
-import { computeConstraints } from "@/lib/metrics/constraint";
-import { narrateInsights } from "@/lib/insights/narrate";
-import { narrateExecutive } from "@/lib/insights/narrate-executive";
-import { narrateWeeklyPriorities } from "@/lib/insights/narrate-weekly";
+import { narrateAll } from "@/lib/insights/narrate-all";
+import type { NarrativeStatus } from "@/lib/insights/narrative-meta";
 import { logger } from "@/lib/logger";
+
+export type BuildNarrativeResult = { status: NarrativeStatus; map: Record<string, unknown> } | null;
 
 export async function buildUploadNarrative(
   companyId: string,
   uploadId: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<BuildNarrativeResult> {
   try {
     const metrics = await computeMetrics({ companyId, uploadId });
     if (!metrics) return null;
-
-    const narrativeMap: Record<string, unknown> = {};
-
-    // 1. Top-insights narration
-    if (metrics.topInsights.items.length > 0) {
-      const insightMap = await narrateInsights({
-        insights: metrics.topInsights.items,
-        metrics,
-      });
-      Object.assign(narrativeMap, insightMap);
-    }
-
-    // 2 & 3. Executive Priority + Weekly Priorities
-    const { primary, weeklyPriorities } = computeConstraints(metrics);
-
-    if (primary) {
-      const execResult = await narrateExecutive({ primary, metrics });
-      if (execResult) {
-        narrativeMap["__executive__"] = {
-          constraintType: primary.constraintType,
-          ...execResult,
-        };
-      }
-    }
-
-    if (weeklyPriorities.items.length > 0) {
-      const weeklyResult = await narrateWeeklyPriorities({
-        priorities: weeklyPriorities.items,
-        metrics,
-      });
-      if (weeklyResult) {
-        narrativeMap["__weekly__"] = weeklyResult;
-      }
-    }
-
-    return narrativeMap;
+    return await narrateAll(metrics);
   } catch (error) {
-    logger.error("Narrative build failed", {
+    logger.error("[AI] narrative build failed", {
       uploadId,
       error: error instanceof Error ? error.message : String(error),
     });

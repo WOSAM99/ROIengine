@@ -1,6 +1,6 @@
 import { TrendingUp } from "lucide-react";
 import { requireCompany } from "@/lib/auth";
-import { computeProgress, type PeriodSnapshot } from "@/lib/progress/compute-progress";
+import { computeProgress } from "@/lib/progress/compute-progress";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { HealthScoreTimeline } from "@/components/progress/health-score-timeline";
@@ -24,18 +24,16 @@ export default async function ProgressPage() {
     );
   }
 
-  const dataPeriods = timeline.periods.filter((p): p is typeof p & { snapshot: PeriodSnapshot } =>
-    Boolean(p.snapshot),
-  );
-  const previous = dataPeriods.length >= 2 ? dataPeriods[dataPeriods.length - 2] : null;
-  const current = dataPeriods.length >= 2 ? dataPeriods[dataPeriods.length - 1] : null;
+  const periods = timeline.periods;
+  const previous = periods.length >= 2 ? periods[periods.length - 2] : null;
+  const current = periods.length >= 2 ? periods[periods.length - 1] : null;
 
   return (
     <section className="space-y-8">
       <PageHeader
         eyebrow="Performance"
         title="Progress Timeline"
-        description="Week-over-week improvement tracking, organized by calendar month."
+        description="Sheet-by-sheet improvement tracking across every uploaded file."
       />
       <HealthScoreTimeline periods={timeline.periods} />
       {timeline.actionValidations.length > 0 && (

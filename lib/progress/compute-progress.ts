@@ -1,16 +1,13 @@
-import { eachWeekOfInterval, endOfWeek, format, isWithinInterval, startOfWeek } from "date-fns";
+import { format } from "date-fns";
 import { db } from "@/lib/db";
 import { computeMetrics } from "@/lib/metrics/engine";
 import { computeConstraints } from "@/lib/metrics/constraint";
 import { computeHealthScore, type HealthScoreResult } from "@/lib/metrics/health-score";
 import type { Metrics } from "@/lib/metrics/types";
+import { ensureScopeNarrative } from "@/lib/insights/ensure-narrative";
 import { computeActionValidations, type ActionValidation } from "./action-validation";
 
-/** Weeks start Monday — a "calendar week" per decision D3. */
-const WEEK_OPTS = { weekStartsOn: 1 as const };
-
 export type PeriodSnapshot = {
-  /** Representative upload for the week (the latest upload landing in that week). */
   uploadId: string;
   filename: string;
   uploadedAt: string;
@@ -19,17 +16,17 @@ export type PeriodSnapshot = {
 };
 
 /**
- * One calendar week on the timeline. Periods are continuous from the first
- * upload's week to the latest upload's week; weeks with no upload are gaps
- * (decision D3). `snapshot` is null for gap weeks.
+ * One uploaded sheet on the timeline (decision D3-rev, 2026-05-27). Every READY
+ * upload that yields computable metrics is its own data point — no calendar-week
+ * bucketing and no "latest upload per week" collapsing. Progress is tracked
+ * sheet-by-sheet, in upload order.
  */
 export type ProgressPeriod = {
-  weekStart: string; // ISO
-  weekEnd: string; // ISO
-  weekLabel: string; // e.g. "May 5–11"
-  monthLabel: string; // e.g. "May 2026"
-  isGap: boolean;
-  snapshot: PeriodSnapshot | null;
+  /** Compact label for the chart x-axis, e.g. "May 12". */
+  label: string;
+  /** Month bucket header for the table, e.g. "May 2026". */
+  monthLabel: string;
+  snapshot: PeriodSnapshot;
 };
 
 export type ComparisonDelta = {
@@ -43,9 +40,9 @@ export type ComparisonDelta = {
 
 export type ProgressTimeline = {
   periods: ProgressPeriod[];
-  /** Latest data-bearing period vs the previous data-bearing period. */
+  /** Latest uploaded sheet vs the previous uploaded sheet. */
   latestVsPrevious: ComparisonDelta | null;
-  /** Labels of the two periods being compared (for the comparison header). */
+  /** Labels of the two sheets being compared (for the comparison header). */
   previousLabel: string | null;
   currentLabel: string | null;
   constraintShift: string | null;
@@ -64,11 +61,7 @@ export async function computeProgress(companyId: string): Promise<ProgressTimeli
   if (uploads.length === 0) return null;
 
   const periods = await buildPeriods(companyId, uploads);
-  if (periods.every((p) => p.isGap)) return null;
-
-  const dataPeriods = periods.filter((p): p is ProgressPeriod & { snapshot: PeriodSnapshot } =>
-    Boolean(p.snapshot),
-  );
+  if (periods.length === 0) return null;
 
   let latestVsPrevious: ComparisonDelta | null = null;
   let constraintShift: string | null = null;
@@ -76,14 +69,23 @@ export async function computeProgress(companyId: string): Promise<ProgressTimeli
   let previousLabel: string | null = null;
   let currentLabel: string | null = null;
 
-  if (dataPeriods.length >= 2) {
-    const prev = dataPeriods[dataPeriods.length - 2];
-    const curr = dataPeriods[dataPeriods.length - 1];
-    previousLabel = prev.weekLabel;
-    currentLabel = curr.weekLabel;
+  if (periods.length >= 2) {
+    const prev = periods[periods.length - 2];
+    const curr = periods[periods.length - 1];
+    previousLabel = prev.snapshot.filename;
+    currentLabel = curr.snapshot.filename;
 
     latestVsPrevious = diff(prev.snapshot, curr.snapshot);
     constraintShift = detectConstraintShift(prev.snapshot.metrics, curr.snapshot.metrics);
+
+    // Backfill AI narratives for the two compared sheets if they predate the
+    // narrative feature (stored value is NULL). One-shot per upload; no-op when
+    // already present (new files generate at import) or no API key. MUST run
+    // before computeActionValidations, which reads prev's stored __weekly__
+    // priorities. See lib/insights/ensure-narrative.ts for the never-re-call guards.
+    await ensureScopeNarrative({ companyId, uploadId: prev.snapshot.uploadId });
+    await ensureScopeNarrative({ companyId, uploadId: curr.snapshot.uploadId });
+
     actionValidations = await computeActionValidations({
       previousUploadId: prev.snapshot.uploadId,
       previousMetrics: prev.snapshot.metrics,
@@ -102,53 +104,28 @@ export async function computeProgress(companyId: string): Promise<ProgressTimeli
 }
 
 /**
- * Bucket uploads into continuous calendar weeks. For each week with uploads, the
- * latest upload represents the week (decision D3). Health-score trend compares
- * each data-bearing period to the previous data-bearing period.
+ * One period per uploaded sheet, in upload order. Health-score trend compares
+ * each sheet to the previous sheet. Uploads that yield no computable metrics
+ * (e.g. zero valid jobs) are skipped rather than shown as empty rows.
  */
 async function buildPeriods(companyId: string, uploads: UploadRow[]): Promise<ProgressPeriod[]> {
-  const firstWeekStart = startOfWeek(uploads[0].uploadedAt, WEEK_OPTS);
-  const lastWeekStart = startOfWeek(uploads[uploads.length - 1].uploadedAt, WEEK_OPTS);
-  const weekStarts = eachWeekOfInterval({ start: firstWeekStart, end: lastWeekStart }, WEEK_OPTS);
-
   const periods: ProgressPeriod[] = [];
   let previousMetrics: Metrics | null = null;
 
-  for (const weekStart of weekStarts) {
-    const weekEnd = endOfWeek(weekStart, WEEK_OPTS);
-    const inWeek = uploads.filter((u) =>
-      isWithinInterval(u.uploadedAt, { start: weekStart, end: weekEnd }),
-    );
-    const representative = inWeek.length > 0 ? inWeek[inWeek.length - 1] : null;
-
-    const base = {
-      weekStart: weekStart.toISOString(),
-      weekEnd: weekEnd.toISOString(),
-      weekLabel: weekLabel(weekStart, weekEnd),
-      monthLabel: format(weekStart, "MMM yyyy"),
-    };
-
-    if (!representative) {
-      periods.push({ ...base, isGap: true, snapshot: null });
-      continue;
-    }
-
-    const metrics = await computeMetrics({ companyId, uploadId: representative.id });
-    if (!metrics) {
-      periods.push({ ...base, isGap: true, snapshot: null });
-      continue;
-    }
+  for (const upload of uploads) {
+    const metrics = await computeMetrics({ companyId, uploadId: upload.id });
+    if (!metrics) continue;
 
     const healthScore = computeHealthScore({ metrics, previousMetrics });
     previousMetrics = metrics;
 
     periods.push({
-      ...base,
-      isGap: false,
+      label: format(upload.uploadedAt, "MMM d"),
+      monthLabel: format(upload.uploadedAt, "MMM yyyy"),
       snapshot: {
-        uploadId: representative.id,
-        filename: representative.filename,
-        uploadedAt: representative.uploadedAt.toISOString(),
+        uploadId: upload.id,
+        filename: upload.filename,
+        uploadedAt: upload.uploadedAt.toISOString(),
         metrics,
         healthScore,
       },
@@ -180,12 +157,4 @@ function detectConstraintShift(prev: Metrics, curr: Metrics): string | null {
     return `${prevPrimary.title} improved. ${currPrimary.title} is now the primary constraint.`;
   }
   return null;
-}
-
-/** "May 5–11" within a month; "May 29–Jun 4" across a month boundary. */
-function weekLabel(weekStart: Date, weekEnd: Date): string {
-  const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
-  return sameMonth
-    ? `${format(weekStart, "MMM d")}–${format(weekEnd, "d")}`
-    : `${format(weekStart, "MMM d")}–${format(weekEnd, "MMM d")}`;
 }

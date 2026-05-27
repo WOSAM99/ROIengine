@@ -23,7 +23,7 @@ import {
   getAnthropicClient,
   isAnthropicConfigured,
   extractUsage,
-  logUsage,
+  logAiCall,
   DEFAULT_INSIGHTS_MODEL,
 } from "@/lib/anthropic";
 import { logger } from "@/lib/logger";
@@ -83,24 +83,12 @@ export async function narrateInsights(input: NarrateInput): Promise<NarrativeMap
   }
 
   if (!isAnthropicConfigured()) {
-    logger.warn(`${FEATURE} skipped — ANTHROPIC_API_KEY not set`, {
-      feature: FEATURE,
-      insight_count: input.insights.length,
-    });
+    logAiCall(FEATURE, "skipped");
     return {};
   }
 
   const client = getAnthropicClient();
   const userMessage = buildUserMessage(input);
-
-  logger.info(`${FEATURE} → calling Anthropic`, {
-    feature: FEATURE,
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    insight_count: input.insights.length,
-    user_message_chars: userMessage.length,
-    system_prompt_chars: SYSTEM_PROMPT.length,
-  });
 
   const started = Date.now();
 
@@ -115,34 +103,17 @@ export async function narrateInsights(input: NarrateInput): Promise<NarrativeMap
 
     const latencyMs = Date.now() - started;
     const usage = extractUsage(response.usage);
-
-    // Token usage (required by ai-safety-rules.md Rule 6).
-    logUsage(FEATURE, usage, response.model);
-
     const text = extractText(response.content);
-    logger.info(`${FEATURE} ← response`, {
-      feature: FEATURE,
-      model: response.model,
-      stop_reason: response.stop_reason,
-      latency_ms: latencyMs,
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-      cache_read_input_tokens: usage.cacheReadTokens,
-      cache_creation_input_tokens: usage.cacheCreationTokens,
-      response_chars: text?.length ?? 0,
-    });
 
-    if (!text) {
-      logger.warn(`${FEATURE}: empty content`, { feature: FEATURE, latency_ms: latencyMs });
-      return {};
-    }
+    // Required by ai-safety-rules.md Rule 6 (token counts). Route + status only — no content.
+    logAiCall(FEATURE, text ? "ok" : "empty", { model: response.model, latencyMs, usage });
+
+    if (!text) return {};
 
     return parseNarratives(text, input.insights);
   } catch (error) {
-    const latencyMs = Date.now() - started;
-    logger.error(`${FEATURE} failed`, {
-      feature: FEATURE,
-      latency_ms: latencyMs,
+    logAiCall(FEATURE, "error", {
+      latencyMs: Date.now() - started,
       error: error instanceof Error ? error.message : String(error),
     });
     return {};

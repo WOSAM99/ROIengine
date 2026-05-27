@@ -4,10 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KpiTile } from "@/components/widgets/kpi-tile";
 import { formatMoney } from "@/lib/format";
+import { CONSTRAINT_LABEL } from "@/lib/metrics/constraint-labels";
 import type { WeeklyPriorities, WeeklyPriorityStatus } from "@/lib/metrics/types";
 
 type WeeklyPrioritiesWidgetProps = {
   data: WeeklyPriorities;
+  /** AI narrative is still being generated for this scope. When false, missing
+   *  AI text renders a deterministic fallback instead of a perpetual skeleton. */
+  aiPending?: boolean;
 };
 
 const STATUS_BADGE_VARIANT: Record<
@@ -20,7 +24,7 @@ const STATUS_BADGE_VARIANT: Record<
   Resolved: "success",
 };
 
-export function WeeklyPrioritiesWidget({ data }: WeeklyPrioritiesWidgetProps) {
+export function WeeklyPrioritiesWidget({ data, aiPending = false }: WeeklyPrioritiesWidgetProps) {
   return (
     <Card>
       <CardHeader>
@@ -62,19 +66,23 @@ export function WeeklyPrioritiesWidget({ data }: WeeklyPrioritiesWidgetProps) {
                   </div>
                 </div>
 
-                {/* Title */}
-                {item.title === null ? (
+                {/* Title — AI text, else skeleton while generating, else deterministic label */}
+                {item.title !== null ? (
+                  <p className="text-foreground text-sm font-semibold">{item.title}</p>
+                ) : aiPending ? (
                   <Skeleton className="h-4 w-48" />
                 ) : (
-                  <p className="text-foreground text-sm font-semibold">{item.title}</p>
+                  <p className="text-foreground text-sm font-semibold">
+                    {CONSTRAINT_LABEL[item.constraintType]}
+                  </p>
                 )}
 
-                {/* Reason */}
-                {item.reason === null ? (
-                  <Skeleton className="h-3.5 w-full" />
-                ) : (
+                {/* Reason — skeleton only while generating; omitted when AI unavailable */}
+                {item.reason !== null ? (
                   <p className="text-muted-foreground text-xs">{item.reason}</p>
-                )}
+                ) : aiPending ? (
+                  <Skeleton className="h-3.5 w-full" />
+                ) : null}
 
                 {/* Expected outcome */}
                 {item.expectedOutcome !== null && (
@@ -93,8 +101,8 @@ export function WeeklyPrioritiesWidget({ data }: WeeklyPrioritiesWidgetProps) {
                   </ul>
                 )}
 
-                {/* Skeleton for actions when AI fields are not yet generated */}
-                {item.actions === null && (
+                {/* Skeleton for actions only while the AI narrative is generating */}
+                {item.actions === null && aiPending && (
                   <div className="space-y-1.5 pt-1">
                     <Skeleton className="h-3 w-full" />
                     <Skeleton className="h-3 w-4/5" />

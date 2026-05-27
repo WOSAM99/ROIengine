@@ -3,10 +3,9 @@ import {
   extractUsage,
   getAnthropicClient,
   isAnthropicConfigured,
-  logUsage,
+  logAiCall,
   type AnthropicUsage,
 } from "@/lib/anthropic";
-import { logger } from "@/lib/logger";
 import { QUESTIONS, type QuestionKey } from "./questions";
 import type { OverviewStats, StatsResult } from "./stats";
 
@@ -70,7 +69,7 @@ export async function summarize({
   payload,
 }: SummarizeInput): Promise<SummarizeOutcome> {
   if (!isAnthropicConfigured()) {
-    logger.warn("chat.summarize skipped — ANTHROPIC_API_KEY not set", { questionKey });
+    logAiCall("chat.summarize", "skipped");
     return notConfiguredOutcome();
   }
   const client = getAnthropicClient();
@@ -78,14 +77,6 @@ export async function summarize({
 
 Data (stats only — no raw job rows, no client names, no individual job IDs):
 ${JSON.stringify(payload, null, 2)}`;
-
-  logger.info("chat.summarize → calling Anthropic (canned)", {
-    feature: "chat.summarize",
-    questionKey,
-    model: DEFAULT_MODEL,
-    user_message_chars: userMessage.length,
-    stats_payload: payload,
-  });
 
   return runAnthropic(client, CANNED_SYSTEM_PROMPT, userMessage, "chat.summarize");
 }
@@ -95,7 +86,7 @@ export async function summarizeFreeform({
   payload,
 }: SummarizeFreeformInput): Promise<SummarizeOutcome> {
   if (!isAnthropicConfigured()) {
-    logger.warn("chat.summarizeFreeform skipped — ANTHROPIC_API_KEY not set");
+    logAiCall("chat.summarizeFreeform", "skipped");
     return notConfiguredOutcome();
   }
   const client = getAnthropicClient();
@@ -104,13 +95,6 @@ export async function summarizeFreeform({
 
 Aggregated dashboard data (stats only — no raw job rows, no client names, no individual job IDs):
 ${JSON.stringify(payload, null, 2)}`;
-
-  logger.info("chat.summarizeFreeform → calling Anthropic (freeform)", {
-    feature: "chat.summarizeFreeform",
-    question: sanitized,
-    model: DEFAULT_MODEL,
-    user_message_chars: userMessage.length,
-  });
 
   return runAnthropic(client, FREEFORM_SYSTEM_PROMPT, userMessage, "chat.summarizeFreeform");
 }
@@ -138,21 +122,12 @@ async function runAnthropic(
     });
     const latencyMs = Date.now() - started;
     const usage = extractUsage(response.usage);
-    logUsage(feature, usage, response.model);
     const textBlock = response.content.find((block) => block.type === "text");
     const narrative = textBlock && "text" in textBlock ? textBlock.text.trim() : "";
-    logger.info(`${feature} ← response`, {
-      feature,
-      model: response.model,
-      stop_reason: response.stop_reason,
-      latency_ms: latencyMs,
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-      cache_read_input_tokens: usage.cacheReadTokens,
-      cache_creation_input_tokens: usage.cacheCreationTokens,
-      narrative_chars: narrative.length,
-      narrative,
-    });
+
+    // Required by ai-safety-rules.md Rule 6 (token counts). Route + status only — no content.
+    logAiCall(feature, narrative ? "ok" : "empty", { model: response.model, latencyMs, usage });
+
     if (!narrative) {
       return {
         available: true,
@@ -166,10 +141,9 @@ async function runAnthropic(
     return { available: true, narrative, model: response.model, usage, latencyMs };
   } catch (error) {
     const latencyMs = Date.now() - started;
-    logger.error(`${feature} failed`, {
-      feature,
-      latency_ms: latencyMs,
-      message: error instanceof Error ? error.message : String(error),
+    logAiCall(feature, "error", {
+      latencyMs,
+      error: error instanceof Error ? error.message : String(error),
     });
     return {
       available: true,

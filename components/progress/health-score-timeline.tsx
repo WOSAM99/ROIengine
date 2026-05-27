@@ -16,16 +16,13 @@ type Trend = "up" | "flat" | "down";
 
 type ChartPoint = {
   label: string;
-  score: number | null;
+  score: number;
   trend: Trend;
 };
 
 function buildChartData(periods: ProgressPeriod[]): ChartPoint[] {
   let prevScore: number | null = null;
   return periods.map((p) => {
-    if (!p.snapshot) {
-      return { label: p.weekLabel, score: null, trend: "flat" as Trend };
-    }
     const score = p.snapshot.healthScore.total;
     let trend: Trend = "flat";
     if (prevScore !== null) {
@@ -34,7 +31,7 @@ function buildChartData(periods: ProgressPeriod[]): ChartPoint[] {
       else if (delta < -1) trend = "down";
     }
     prevScore = score;
-    return { label: p.weekLabel, score, trend };
+    return { label: p.label, score, trend };
   });
 }
 
@@ -42,6 +39,14 @@ function dotColor(trend: Trend): string {
   if (trend === "up") return "var(--success-500)";
   if (trend === "down") return "var(--danger-500)";
   return "var(--warning-500)";
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 export function HealthScoreTimeline({ periods }: Props) {
@@ -52,7 +57,7 @@ export function HealthScoreTimeline({ periods }: Props) {
       <CardHeader>
         <CardTitle>Health Score</CardTitle>
         <CardDescription>
-          0–100 operational score by calendar week. Weeks with no upload are shown as gaps.
+          0–100 operational score for every uploaded sheet, in upload order.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -61,7 +66,7 @@ export function HealthScoreTimeline({ periods }: Props) {
           <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2.5 font-medium">Week</th>
+                <th className="px-4 py-2.5 font-medium">Upload</th>
                 <th className="px-4 py-2.5 text-right font-medium">Score</th>
                 <th className="px-4 py-2.5 text-right font-medium">Gross Margin</th>
                 <th className="px-4 py-2.5 text-right font-medium">Cash Collected</th>
@@ -72,7 +77,7 @@ export function HealthScoreTimeline({ periods }: Props) {
               {periods.map((p, i) => {
                 const showMonthHeader = i === 0 || periods[i - 1].monthLabel !== p.monthLabel;
                 return (
-                  <Fragment key={p.weekStart}>
+                  <Fragment key={p.snapshot.uploadId}>
                     {showMonthHeader && (
                       <tr className="bg-muted/60">
                         <td
@@ -84,30 +89,26 @@ export function HealthScoreTimeline({ periods }: Props) {
                       </tr>
                     )}
                     <tr className="border-b last:border-0">
-                      <td className="text-muted-foreground px-4 py-2.5 text-xs">{p.weekLabel}</td>
-                      {p.snapshot ? (
-                        <>
-                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
-                            {p.snapshot.healthScore.total}
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">
-                            {formatPct(p.snapshot.metrics.jobHealth.avgMarginPct)}
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">
-                            {formatMoney(p.snapshot.metrics.cashFlow.cashCollected)}
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">
-                            {formatMoney(p.snapshot.metrics.cashFlow.arOver30)}
-                          </td>
-                        </>
-                      ) : (
-                        <td
-                          colSpan={4}
-                          className="text-muted-foreground/60 px-4 py-2.5 text-right text-xs italic"
-                        >
-                          No upload this week
-                        </td>
-                      )}
+                      <td className="px-4 py-2.5">
+                        <span className="text-foreground block max-w-[220px] truncate font-mono text-xs">
+                          {p.snapshot.filename}
+                        </span>
+                        <span className="text-muted-foreground/70 text-[11px]">
+                          {formatDate(p.snapshot.uploadedAt)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
+                        {p.snapshot.healthScore.total}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">
+                        {formatPct(p.snapshot.metrics.jobHealth.avgMarginPct)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">
+                        {formatMoney(p.snapshot.metrics.cashFlow.cashCollected)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">
+                        {formatMoney(p.snapshot.metrics.cashFlow.arOver30)}
+                      </td>
                     </tr>
                   </Fragment>
                 );
@@ -150,9 +151,6 @@ function HealthLineChart({ chartData }: { chartData: ChartPoint[] }) {
                 cy: number;
                 payload: ChartPoint;
               };
-              if (payload.score === null) {
-                return <circle key={`dot-${cx}-${cy}`} cx={cx} cy={cy} r={0} fill="transparent" />;
-              }
               return (
                 <circle
                   key={`dot-${cx}-${cy}`}

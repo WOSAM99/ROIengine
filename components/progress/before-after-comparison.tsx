@@ -96,13 +96,17 @@ export function BeforeAfterComparison({
         <CardTitle>Period Comparison</CardTitle>
         <div className="mt-1 grid grid-cols-3 text-xs">
           <span className="text-muted-foreground">&nbsp;</span>
-          <span className="text-muted-foreground text-center font-medium">
-            {previousLabel}
+          <span className="text-muted-foreground px-1 text-center font-medium break-words">
+            <span className="font-mono" title={previousLabel}>
+              {previousLabel}
+            </span>
             <br />
             <span className="text-muted-foreground/70">{formatDate(previous.uploadedAt)}</span>
           </span>
-          <span className="text-muted-foreground text-center font-medium">
-            {currentLabel}
+          <span className="text-muted-foreground px-1 text-center font-medium break-words">
+            <span className="font-mono" title={currentLabel}>
+              {currentLabel}
+            </span>
             <br />
             <span className="text-muted-foreground/70">{formatDate(current.uploadedAt)}</span>
           </span>

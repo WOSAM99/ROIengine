@@ -2,13 +2,17 @@ import { Sparkles, Target, Lightbulb, ListChecks } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KpiTile } from "@/components/widgets/kpi-tile";
+import { CONSTRAINT_LABEL } from "@/lib/metrics/constraint-labels";
 import type { ExecutivePriority } from "@/lib/metrics/types";
 
 type ExecutivePriorityWidgetProps = {
   data: ExecutivePriority;
+  /** AI narrative is still being generated for this scope. When false, missing
+   *  AI text renders a deterministic fallback instead of a perpetual skeleton. */
+  aiPending?: boolean;
 };
 
-export function ExecutivePriorityWidget({ data }: ExecutivePriorityWidgetProps) {
+export function ExecutivePriorityWidget({ data, aiPending = false }: ExecutivePriorityWidgetProps) {
   return (
     <section aria-labelledby="executive-priority-heading">
       <Card className="overflow-hidden">
@@ -37,8 +41,9 @@ export function ExecutivePriorityWidget({ data }: ExecutivePriorityWidgetProps) 
             </div>
           )}
 
-          {/* AI-generated sections */}
-          {data.directive === null ? (
+          {/* AI-generated sections — skeleton only while generating; deterministic
+              fallback when the AI narrative is unavailable (never loops forever) */}
+          {data.directive === null && aiPending ? (
             <div className="space-y-3">
               <Skeleton className="h-5 w-3/4" />
               <Skeleton className="h-4 w-full" />
@@ -48,6 +53,20 @@ export function ExecutivePriorityWidget({ data }: ExecutivePriorityWidgetProps) 
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-4 w-5/6" />
                 <Skeleton className="h-4 w-4/5" />
+              </div>
+            </div>
+          ) : data.directive === null ? (
+            <div className="flex gap-3">
+              <span className="mt-0.5 shrink-0">
+                <Target className="text-accent h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-muted-foreground mb-1 text-[10px] font-semibold tracking-wider uppercase">
+                  What to do
+                </p>
+                <p className="text-foreground text-sm font-medium">
+                  {CONSTRAINT_LABEL[data.constraintType]}
+                </p>
               </div>
             </div>
           ) : (

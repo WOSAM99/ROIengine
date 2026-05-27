@@ -56,23 +56,43 @@ export function extractUsage(
   };
 }
 
+export type AiCallStatus = "ok" | "empty" | "error" | "skipped";
+
 /**
- * Emits a single log line summarising every Anthropic API call's token usage.
- * Required by `.claude/rules/ai-safety-rules.md` Rule 6 ("Every LLM call MUST
- * log input and output token counts").
+ * Single uniform log line for every Anthropic API call: the call's ROUTE (the
+ * feature identifier) and its STATUS. Deliberately logs NO request/response
+ * content — no payloads, prompts, questions, or generated text. Only the route,
+ * status, model, latency, and token counts.
+ *
+ * - `ok`      — call returned usable content
+ * - `empty`   — call succeeded but returned no usable content
+ * - `error`   — call threw (network / API error)
+ * - `skipped` — no ANTHROPIC_API_KEY, so no call was made
+ *
+ * Token counts satisfy `.claude/rules/ai-safety-rules.md` Rule 6 ("Every LLM
+ * call MUST log input and output token counts").
  *
  * Output appears in the Next.js SERVER console (the terminal running `pnpm dev`),
  * NOT in the browser devtools — these calls happen server-side.
  */
-export function logUsage(feature: string, usage: AnthropicUsage, model: string) {
-  const totalBillable = usage.inputTokens + usage.outputTokens;
-  logger.info(`[LLM USAGE] ${feature}`, {
-    feature,
-    model,
-    input_tokens: usage.inputTokens,
-    output_tokens: usage.outputTokens,
-    cache_read_input_tokens: usage.cacheReadTokens,
-    cache_creation_input_tokens: usage.cacheCreationTokens,
-    total_billable_tokens: totalBillable,
-  });
+export function logAiCall(
+  route: string,
+  status: AiCallStatus,
+  meta?: { model?: string; latencyMs?: number; usage?: AnthropicUsage; error?: string },
+): void {
+  const fields: Record<string, unknown> = { route, status };
+  if (meta?.model) fields.model = meta.model;
+  if (meta?.latencyMs != null) fields.latency_ms = meta.latencyMs;
+  if (meta?.usage) {
+    fields.input_tokens = meta.usage.inputTokens;
+    fields.output_tokens = meta.usage.outputTokens;
+  }
+  if (meta?.error) fields.error = meta.error;
+
+  const message = `[AI] ${route} → ${status}`;
+  if (status === "error") {
+    logger.error(message, fields);
+  } else {
+    logger.info(message, fields);
+  }
 }

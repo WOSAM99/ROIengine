@@ -15,7 +15,7 @@ import {
   extractUsage,
   getAnthropicClient,
   isAnthropicConfigured,
-  logUsage,
+  logAiCall,
 } from "@/lib/anthropic";
 import { logger } from "@/lib/logger";
 import type { ConstraintType, ExecutivePriorityKpi, Metrics } from "@/lib/metrics/types";
@@ -55,19 +55,12 @@ export async function narrateExecutive(input: {
   metrics: Pick<Metrics, "profitPulse" | "jobHealth" | "cashFlow" | "pmPerformance">;
 }): Promise<ExecutiveNarrativeResult | null> {
   if (!isAnthropicConfigured()) {
-    logger.warn(`${FEATURE} skipped — ANTHROPIC_API_KEY not set`);
+    logAiCall(FEATURE, "skipped");
     return null;
   }
 
   const client = getAnthropicClient();
   const userMessage = buildUserMessage(input);
-
-  logger.info(`${FEATURE} → calling Anthropic`, {
-    feature: FEATURE,
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    constraint_type: input.primary.constraintType,
-  });
 
   const started = Date.now();
 
@@ -82,26 +75,17 @@ export async function narrateExecutive(input: {
 
     const latencyMs = Date.now() - started;
     const usage = extractUsage(response.usage);
-    logUsage(FEATURE, usage, response.model);
-
     const text = extractText(response.content);
-    logger.info(`${FEATURE} ← response`, {
-      feature: FEATURE,
-      latency_ms: latencyMs,
-      input_tokens: usage.inputTokens,
-      output_tokens: usage.outputTokens,
-    });
 
-    if (!text) {
-      logger.warn(`${FEATURE}: empty content`);
-      return null;
-    }
+    // Required by ai-safety-rules.md Rule 6 (token counts). Route + status only — no content.
+    logAiCall(FEATURE, text ? "ok" : "empty", { model: response.model, latencyMs, usage });
+
+    if (!text) return null;
 
     return parseResult(text);
   } catch (error) {
-    logger.error(`${FEATURE} failed`, {
-      feature: FEATURE,
-      latency_ms: Date.now() - started,
+    logAiCall(FEATURE, "error", {
+      latencyMs: Date.now() - started,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
