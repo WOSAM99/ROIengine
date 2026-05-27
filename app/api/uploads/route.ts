@@ -9,7 +9,10 @@ import { validateFile, validateMapping } from "@/lib/parse/validate";
 import { CANONICAL_FIELDS, type ColumnMapping, type NormalizedJob } from "@/lib/parse/types";
 import { logger } from "@/lib/logger";
 import { computeMetrics } from "@/lib/metrics/engine";
+import { computeConstraints } from "@/lib/metrics/constraint";
 import { narrateInsights } from "@/lib/insights/narrate";
+import { narrateExecutive } from "@/lib/insights/narrate-executive";
+import { narrateWeeklyPriorities } from "@/lib/insights/narrate-weekly";
 import { refreshAllUploadsNarrative } from "@/lib/insights/aggregate-narrative";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -148,9 +151,13 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Compute metrics for the just-imported upload and generate per-insight narratives.
- * Returns the narrative map ({} if nothing to narrate, null on any failure path —
- * caller writes null to leave the column untouched / null).
+ * Compute metrics for the just-imported upload and generate all AI narratives:
+ *   1. Top-insights narration (existing)
+ *   2. Executive Priority Header (new)
+ *   3. Weekly Priorities (new)
+ *
+ * Returns the merged narrative map, or null on catastrophic failure.
+ * Individual narration failures are catch-and-continue — upload always succeeds.
  */
 async function buildInsightsNarrative(
   companyId: string,
@@ -158,18 +165,45 @@ async function buildInsightsNarrative(
 ): Promise<Record<string, unknown> | null> {
   try {
     const metrics = await computeMetrics({ companyId, uploadId });
-    if (!metrics || metrics.topInsights.items.length === 0) {
-      return null;
+    if (!metrics) return null;
+
+    const narrativeMap: Record<string, unknown> = {};
+
+    // 1. Top-insights narration (existing)
+    if (metrics.topInsights.items.length > 0) {
+      const insightMap = await narrateInsights({
+        insights: metrics.topInsights.items,
+        metrics,
+      });
+      Object.assign(narrativeMap, insightMap);
     }
-    const map = await narrateInsights({
-      insights: metrics.topInsights.items,
-      metrics,
-    });
-    // narrateInsights returns {} on fail-silent paths. Persist {} so we know it was tried —
-    // this prevents any ambiguity between "not yet narrated" (null) and "narration was empty" ({}).
-    return map;
+
+    // 2 & 3. Executive Priority + Weekly Priorities (new)
+    const { primary, weeklyPriorities } = computeConstraints(metrics);
+
+    if (primary) {
+      const execResult = await narrateExecutive({ primary, metrics });
+      if (execResult) {
+        narrativeMap["__executive__"] = {
+          constraintType: primary.constraintType,
+          ...execResult,
+        };
+      }
+    }
+
+    if (weeklyPriorities.items.length > 0) {
+      const weeklyResult = await narrateWeeklyPriorities({
+        priorities: weeklyPriorities.items,
+        metrics,
+      });
+      if (weeklyResult) {
+        narrativeMap["__weekly__"] = weeklyResult;
+      }
+    }
+
+    return narrativeMap;
   } catch (error) {
-    logger.error("Top Insights narrative build failed", {
+    logger.error("Narrative build failed", {
       uploadId,
       error: error instanceof Error ? error.message : String(error),
     });

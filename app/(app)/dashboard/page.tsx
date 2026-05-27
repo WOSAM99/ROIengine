@@ -3,12 +3,14 @@ import { LineChart, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireCompany } from "@/lib/auth";
-import { computeMetrics, ALL_UPLOADS } from "@/lib/metrics/engine";
+import { computeExtendedMetrics, ALL_UPLOADS } from "@/lib/metrics/engine";
 import { db } from "@/lib/db";
 import { ProfitPulseWidget } from "@/components/widgets/profit-pulse";
 import { JobHealthWidget } from "@/components/widgets/job-health";
 import { CashFlowWidget } from "@/components/widgets/cash-flow";
 import { TopInsightsWidget } from "@/components/widgets/top-insights";
+import { ExecutivePriorityWidget } from "@/components/widgets/executive-priority";
+import { WeeklyPrioritiesWidget } from "@/components/widgets/weekly-priorities";
 import { UploadSwitcher, ALL_UPLOADS_VALUE } from "@/components/upload-switcher";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -77,7 +79,7 @@ async function DashboardContent({
 }) {
   const isAllView = selectedUploadId === ALL_UPLOADS_VALUE;
 
-  const metrics = await computeMetrics({
+  const metrics = await computeExtendedMetrics({
     companyId,
     uploadId: isAllView ? ALL_UPLOADS : selectedUploadId,
   });
@@ -129,12 +131,18 @@ async function DashboardContent({
 
       {metrics && (activeUpload || isAllView) ? (
         <>
+          {metrics.executivePriority && (
+            <ExecutivePriorityWidget data={metrics.executivePriority} />
+          )}
           <ProfitPulseWidget data={metrics.profitPulse} />
           <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
             <JobHealthWidget data={metrics.jobHealth} />
             <CashFlowWidget data={metrics.cashFlow} />
           </div>
-          <TopInsightsWidget data={metrics.topInsights} />
+          <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+            <TopInsightsWidget data={metrics.topInsights} />
+            <WeeklyPrioritiesWidget data={metrics.weeklyPriorities} />
+          </div>
         </>
       ) : (
         <Card>
