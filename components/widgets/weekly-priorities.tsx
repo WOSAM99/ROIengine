@@ -3,8 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KpiTile } from "@/components/widgets/kpi-tile";
-import { formatMoney } from "@/lib/format";
-import { CONSTRAINT_LABEL } from "@/lib/metrics/constraint-labels";
 import type { WeeklyPriorities, WeeklyPriorityStatus } from "@/lib/metrics/types";
 
 type WeeklyPrioritiesWidgetProps = {
@@ -44,37 +42,36 @@ export function WeeklyPrioritiesWidget({ data, aiPending = false }: WeeklyPriori
           <ol className="space-y-4">
             {data.items.map((item, index) => (
               <li key={item.id} className="border-border space-y-3 rounded-xl border p-4">
-                {/* Header row: rank + status badge + impact */}
+                {/* Header row: rank + status badge */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-muted-foreground font-mono text-xs font-bold tabular-nums">
                     #{index + 1}
                   </span>
                   <Badge variant={STATUS_BADGE_VARIANT[item.status]}>{item.status}</Badge>
-                  <div className="ml-auto shrink-0">
-                    <KpiTile
-                      label="Est. impact"
-                      value={formatMoney(item.estimatedImpact)}
-                      tone={
-                        item.status === "Critical"
-                          ? "danger"
-                          : item.status === "High"
-                            ? "warning"
-                            : "slate"
-                      }
-                      className="px-2 py-1.5 text-xs"
-                    />
-                  </div>
                 </div>
 
-                {/* Title — AI text, else skeleton while generating, else deterministic label */}
+                {/* Title — AI text, else skeleton while generating, else deterministic constraint title */}
                 {item.title !== null ? (
                   <p className="text-foreground text-sm font-semibold">{item.title}</p>
                 ) : aiPending ? (
                   <Skeleton className="h-4 w-48" />
                 ) : (
-                  <p className="text-foreground text-sm font-semibold">
-                    {CONSTRAINT_LABEL[item.constraintType]}
-                  </p>
+                  <p className="text-foreground text-sm font-semibold">{item.constraintTitle}</p>
+                )}
+
+                {/* KPI tiles grid — always shown, derived from metrics */}
+                {item.kpis.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {item.kpis.map((kpi) => (
+                      <KpiTile
+                        key={kpi.label}
+                        label={kpi.label}
+                        value={kpi.value}
+                        tone={kpi.tone}
+                        className="px-2.5 py-2 text-xs"
+                      />
+                    ))}
+                  </div>
                 )}
 
                 {/* Reason — skeleton only while generating; omitted when AI unavailable */}

@@ -64,6 +64,8 @@ export function computeConstraints(metrics: Metrics): {
     constraintType: c.constraintType,
     status: scoreToStatus(c.score),
     estimatedImpact: String(Math.round(c.financialImpact)),
+    constraintTitle: c.title,
+    kpis: c.kpis,
     title: null,
     reason: null,
     expectedOutcome: null,

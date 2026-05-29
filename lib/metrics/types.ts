@@ -149,6 +149,9 @@ export type WeeklyPriority = {
   constraintType: ConstraintType;
   status: WeeklyPriorityStatus;
   estimatedImpact: string;
+  /** Deterministic title derived from metrics (always present). AI title takes precedence when available. */
+  constraintTitle: string;
+  kpis: ExecutivePriorityKpi[];
   title: string | null;
   reason: string | null;
   expectedOutcome: string | null;
