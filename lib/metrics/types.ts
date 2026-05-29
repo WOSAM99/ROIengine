@@ -118,3 +118,49 @@ export type Metrics = {
   pmPerformance: PmPerformance;
   topInsights: TopInsights;
 };
+
+export type ConstraintType =
+  | "ar_aging"
+  | "gross_margin"
+  | "negative_job_type"
+  | "cash_efficiency"
+  | "pm_variance";
+
+export type ExecutivePriorityKpi = {
+  label: string;
+  value: string;
+  tone: "danger" | "warning" | "info" | "success" | "accent" | "slate";
+};
+
+export type ExecutivePriority = {
+  constraintType: ConstraintType;
+  title: string;
+  kpis: ExecutivePriorityKpi[];
+  score: number;
+  directive: string | null;
+  whyItMatters: string | null;
+  howToExecute: string[] | null;
+};
+
+export type WeeklyPriorityStatus = "Critical" | "High" | "Moderate" | "Resolved";
+
+export type WeeklyPriority = {
+  id: string;
+  constraintType: ConstraintType;
+  status: WeeklyPriorityStatus;
+  estimatedImpact: string;
+  /** Deterministic title derived from metrics (always present). AI title takes precedence when available. */
+  constraintTitle: string;
+  kpis: ExecutivePriorityKpi[];
+  title: string | null;
+  reason: string | null;
+  expectedOutcome: string | null;
+  actions: string[] | null;
+};
+
+export type WeeklyPriorities = { items: WeeklyPriority[] };
+
+export type ExtendedMetrics = Metrics & {
+  executivePriority: ExecutivePriority | null;
+  weeklyPriorities: WeeklyPriorities;
+};

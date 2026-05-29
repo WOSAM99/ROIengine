@@ -8,9 +8,9 @@ import { normalize } from "@/lib/parse/normalize";
 import { validateFile, validateMapping } from "@/lib/parse/validate";
 import { CANONICAL_FIELDS, type ColumnMapping, type NormalizedJob } from "@/lib/parse/types";
 import { logger } from "@/lib/logger";
-import { computeMetrics } from "@/lib/metrics/engine";
-import { narrateInsights } from "@/lib/insights/narrate";
+import { buildUploadNarrative } from "@/lib/insights/build-upload-narrative";
 import { refreshAllUploadsNarrative } from "@/lib/insights/aggregate-narrative";
+import { attachMeta } from "@/lib/insights/narrative-meta";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const INSERT_BATCH = 500;
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
     // User directive (2026-04-21): "reload of data only when there new files uploaded".
     // Both fail-silent — upload still succeeds if either narrate call errors.
     const [perUploadNarrative] = await Promise.all([
-      buildInsightsNarrative(ctx.companyId, upload.id),
+      buildUploadNarrative(ctx.companyId, upload.id),
       refreshAllUploadsNarrative(ctx.companyId),
     ]);
 
@@ -118,8 +118,13 @@ export async function POST(request: NextRequest) {
         where: { id: upload.id },
         data: {
           // Field added in migration 20260421120000. Cast until generated types catch up.
+          // attachMeta records status + attempt count so backfill-on-view never re-calls.
           ...({
-            insightsNarrative: perUploadNarrative as Prisma.InputJsonValue,
+            insightsNarrative: attachMeta(
+              perUploadNarrative.map,
+              perUploadNarrative.status,
+              1,
+            ) as Prisma.InputJsonValue,
           } as Prisma.UploadUpdateInput),
         },
       });
@@ -144,36 +149,6 @@ export async function POST(request: NextRequest) {
       },
     });
     return NextResponse.json({ error: "Failed to persist upload" }, { status: 500 });
-  }
-}
-
-/**
- * Compute metrics for the just-imported upload and generate per-insight narratives.
- * Returns the narrative map ({} if nothing to narrate, null on any failure path —
- * caller writes null to leave the column untouched / null).
- */
-async function buildInsightsNarrative(
-  companyId: string,
-  uploadId: string,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const metrics = await computeMetrics({ companyId, uploadId });
-    if (!metrics || metrics.topInsights.items.length === 0) {
-      return null;
-    }
-    const map = await narrateInsights({
-      insights: metrics.topInsights.items,
-      metrics,
-    });
-    // narrateInsights returns {} on fail-silent paths. Persist {} so we know it was tried —
-    // this prevents any ambiguity between "not yet narrated" (null) and "narration was empty" ({}).
-    return map;
-  } catch (error) {
-    logger.error("Top Insights narrative build failed", {
-      uploadId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
   }
 }
 

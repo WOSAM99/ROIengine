@@ -58,3 +58,13 @@ next-env.d.ts
 scaffold-tmp/
 CLAUDE.md
 AI_DOCS/
+# ─── AI_DOCS — Temp & Generated Files (added by upgrade.sh) ────
+AI_DOCS/memory/figma-snapshots/Screens/
+AI_DOCS/*.txt
+AI_DOCS/*.py
+AI_DOCS/design/samples/
+AI_DOCS/design/src/
+AI_DOCS/memory/.prompt-counter
+AI_DOCS/memory/compaction-snapshot.md
+AI_DOCS/memory/metrics.jsonl
+AI_DOCS/audit/agent-log.md

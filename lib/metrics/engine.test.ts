@@ -108,8 +108,8 @@ describe("computeFromJobs — deterministic metrics", () => {
   it("Top Insights ranks margin leaks and A/R delay by impact", () => {
     const items = metrics.topInsights.items;
     expect(items.length).toBeGreaterThan(0);
-    expect(items.length).toBeLessThanOrEqual(3);
-    // AR leak impact = 400 — should be the top insight
+    expect(items.length).toBeLessThanOrEqual(5); // INSIGHT_LIMIT raised 3 → 5
+    // AR leak impact = 400 — should be the top insight (critical severity beats all)
     const top = items[0];
     expect(top.dimension).toBe("ar");
     expect(top.estimatedImpact).toBe("400");

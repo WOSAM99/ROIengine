@@ -3,12 +3,16 @@ import { LineChart, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireCompany } from "@/lib/auth";
-import { computeMetrics, ALL_UPLOADS } from "@/lib/metrics/engine";
+import { computeExtendedMetrics, ALL_UPLOADS } from "@/lib/metrics/engine";
+import { scopeNeedsNarrative } from "@/lib/insights/ensure-narrative";
+import { NarrativeBackfill } from "@/components/insights/narrative-backfill";
 import { db } from "@/lib/db";
 import { ProfitPulseWidget } from "@/components/widgets/profit-pulse";
 import { JobHealthWidget } from "@/components/widgets/job-health";
 import { CashFlowWidget } from "@/components/widgets/cash-flow";
 import { TopInsightsWidget } from "@/components/widgets/top-insights";
+import { ExecutivePriorityWidget } from "@/components/widgets/executive-priority";
+import { WeeklyPrioritiesWidget } from "@/components/widgets/weekly-priorities";
 import { UploadSwitcher, ALL_UPLOADS_VALUE } from "@/components/upload-switcher";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -60,7 +64,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           />
         </section>
       ) : (
-        <DashboardContent uploads={uploads} selectedUploadId={uploadId} companyId={ctx.companyId} />
+        // Default to the ALL aggregate view when no specific upload is selected.
+        // scopeNeedsNarrative + <NarrativeBackfill> generate the aggregate AI report
+        // on first view if it's missing, so it always reflects every uploaded file.
+        <DashboardContent
+          uploads={uploads}
+          selectedUploadId={uploadId ?? ALL_UPLOADS_VALUE}
+          companyId={ctx.companyId}
+        />
       )}
     </div>
   );
@@ -76,10 +87,17 @@ async function DashboardContent({
   companyId: string;
 }) {
   const isAllView = selectedUploadId === ALL_UPLOADS_VALUE;
+  const scopeUploadId = isAllView ? ALL_UPLOADS : selectedUploadId;
 
-  const metrics = await computeMetrics({
+  // Render immediately with whatever's stored (rule-based fallback if the AI
+  // narrative is missing). The slow AI backfill is kicked off client-side by
+  // <NarrativeBackfill> below, which refreshes the route when content lands —
+  // so old data no longer blocks behind a full-page loader. AI-free check here.
+  const needsNarrative = await scopeNeedsNarrative({ companyId, uploadId: scopeUploadId });
+
+  const metrics = await computeExtendedMetrics({
     companyId,
-    uploadId: isAllView ? ALL_UPLOADS : selectedUploadId,
+    uploadId: scopeUploadId,
   });
 
   const activeUpload = isAllView
@@ -127,14 +145,23 @@ async function DashboardContent({
         }
       />
 
+      <NarrativeBackfill
+        scope={isAllView ? ALL_UPLOADS_VALUE : (activeUpload?.id ?? "")}
+        enabled={needsNarrative}
+      />
+
       {metrics && (activeUpload || isAllView) ? (
         <>
+          {metrics.executivePriority && (
+            <ExecutivePriorityWidget data={metrics.executivePriority} aiPending={needsNarrative} />
+          )}
           <ProfitPulseWidget data={metrics.profitPulse} />
           <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
             <JobHealthWidget data={metrics.jobHealth} />
             <CashFlowWidget data={metrics.cashFlow} />
           </div>
           <TopInsightsWidget data={metrics.topInsights} />
+          <WeeklyPrioritiesWidget data={metrics.weeklyPriorities} aiPending={needsNarrative} />
         </>
       ) : (
         <Card>

@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { requireCompany } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { computeMetrics } from "@/lib/metrics/engine";
+import { scopeNeedsNarrative } from "@/lib/insights/ensure-narrative";
+import { NarrativeBackfill } from "@/components/insights/narrative-backfill";
 import { ProfitPulseWidget } from "@/components/widgets/profit-pulse";
 import { JobHealthWidget } from "@/components/widgets/job-health";
 import { CashFlowWidget } from "@/components/widgets/cash-flow";
@@ -27,6 +29,14 @@ export default async function UploadDetailPage({ params }: PageProps) {
     where: { id: uploadId, companyId: ctx.companyId },
   });
   if (!upload) notFound();
+
+  // Render immediately with stored data (rule-based fallback if the AI narrative
+  // is missing). The slow AI backfill runs client-side via <NarrativeBackfill>
+  // below and refreshes the route when content lands. AI-free check here.
+  const needsNarrative =
+    upload.status === "READY"
+      ? await scopeNeedsNarrative({ companyId: ctx.companyId, uploadId: upload.id })
+      : false;
 
   const metrics =
     upload.status === "READY"
@@ -73,6 +83,10 @@ export default async function UploadDetailPage({ params }: PageProps) {
             Import failed: {upload.errorMessage ?? "unknown error"}
           </p>
         </div>
+      )}
+
+      {upload.status === "READY" && (
+        <NarrativeBackfill scope={upload.id} enabled={needsNarrative} />
       )}
 
       {metrics && (

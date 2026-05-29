@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, MessageSquare, Settings, Upload } from "lucide-react";
+import { BarChart3, MessageSquare, Settings, TrendingUp, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SignOutButton } from "./sign-out-button";
 
@@ -12,6 +12,7 @@ type AppShellProps = {
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/progress", label: "Progress", icon: TrendingUp },
   { href: "/uploads", label: "Uploads", icon: Upload },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings },

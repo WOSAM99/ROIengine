@@ -1,6 +1,15 @@
 import { Decimal } from "decimal.js";
 import { db } from "@/lib/db";
-import type { InsightNarrative, MetricJob, Metrics } from "./types";
+import type {
+  ExecutivePriority,
+  ExtendedMetrics,
+  InsightNarrative,
+  MetricJob,
+  Metrics,
+  WeeklyPriorities,
+  WeeklyPriority,
+} from "./types";
+import { computeConstraints } from "./constraint";
 import { computeProfitPulse } from "./profit-pulse";
 import { computeJobHealth } from "./job-health";
 import { computeCashFlow } from "./cash-flow";
@@ -177,4 +186,127 @@ export function computeFromJobs(jobs: MetricJob[], targetMarginFraction: number)
     pmPerformance,
     topInsights,
   };
+}
+
+/**
+ * Extends computeMetrics with deterministic constraint data and cached AI narratives
+ * for the Executive Priority Header and Weekly Priorities dashboard sections.
+ */
+export async function computeExtendedMetrics(
+  input: ComputeMetricsInput,
+): Promise<ExtendedMetrics | null> {
+  const base = await computeMetrics(input);
+  if (!base) return null;
+
+  const { primary, weeklyPriorities } = computeConstraints(base);
+
+  const rawNarrative = await loadRawNarrative(input);
+  const execCached = parseExecutiveCached(rawNarrative);
+  const weeklyCached = parseWeeklyCached(rawNarrative);
+
+  const executivePriority: ExecutivePriority | null = primary
+    ? {
+        ...primary,
+        directive: execCached?.directive ?? null,
+        whyItMatters: execCached?.whyItMatters ?? null,
+        howToExecute: execCached?.howToExecute ?? null,
+      }
+    : null;
+
+  const weeklyItems: WeeklyPriority[] = weeklyPriorities.items.map((item) => {
+    const cached = weeklyCached?.[item.id];
+    return {
+      ...item,
+      title: cached?.title ?? null,
+      reason: cached?.reason ?? null,
+      expectedOutcome: cached?.expectedOutcome ?? null,
+      actions: cached?.actions ?? null,
+    };
+  });
+
+  return {
+    ...base,
+    executivePriority,
+    weeklyPriorities: { items: weeklyItems } satisfies WeeklyPriorities,
+  };
+}
+
+async function loadRawNarrative(input: ComputeMetricsInput): Promise<unknown> {
+  if (input.uploadId === ALL_UPLOADS) {
+    const row = await db.company.findUnique({
+      where: { id: input.companyId },
+      select: { id: true },
+    });
+    if (!row) return null;
+    const full = (await db.company.findUnique({
+      where: { id: input.companyId },
+    })) as ({ allInsightsNarrative?: unknown } & { id: string }) | null;
+    return full?.allInsightsNarrative ?? null;
+  }
+
+  if (input.uploadId) {
+    const row = await db.upload.findFirst({
+      where: { id: input.uploadId, companyId: input.companyId },
+    });
+    return (
+      (row as (typeof row & { insightsNarrative?: unknown }) | null)?.insightsNarrative ?? null
+    );
+  }
+
+  // Latest upload (no uploadId specified)
+  const row = await db.upload.findFirst({
+    where: { companyId: input.companyId, status: "READY" },
+    orderBy: { uploadedAt: "desc" },
+  });
+  return (row as (typeof row & { insightsNarrative?: unknown }) | null)?.insightsNarrative ?? null;
+}
+
+type ExecutiveCached = {
+  directive: string;
+  whyItMatters: string;
+  howToExecute: string[];
+} | null;
+
+function parseExecutiveCached(raw: unknown): ExecutiveCached {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const exec = obj["__executive__"];
+  if (!exec || typeof exec !== "object") return null;
+  const e = exec as Record<string, unknown>;
+  if (typeof e.directive !== "string") return null;
+  if (typeof e.whyItMatters !== "string") return null;
+  if (!Array.isArray(e.howToExecute)) return null;
+  return {
+    directive: e.directive,
+    whyItMatters: e.whyItMatters,
+    howToExecute: e.howToExecute.filter((s): s is string => typeof s === "string"),
+  };
+}
+
+type WeeklyCachedMap = Record<
+  string,
+  { title: string; reason: string; expectedOutcome: string; actions: string[] }
+> | null;
+
+function parseWeeklyCached(raw: unknown): WeeklyCachedMap {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const weekly = obj["__weekly__"];
+  if (!weekly || typeof weekly !== "object") return null;
+  const result: WeeklyCachedMap = {};
+  for (const [id, value] of Object.entries(weekly as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const v = value as Record<string, unknown>;
+    if (typeof v.title !== "string") continue;
+    if (typeof v.reason !== "string") continue;
+    if (typeof v.expectedOutcome !== "string") continue;
+    if (!Array.isArray(v.actions)) continue;
+    result![id] = {
+      title: v.title,
+      reason: v.reason,
+      expectedOutcome: v.expectedOutcome,
+      actions: v.actions.filter((a): a is string => typeof a === "string"),
+    };
+  }
+  return Object.keys(result!).length > 0 ? result : null;
 }
