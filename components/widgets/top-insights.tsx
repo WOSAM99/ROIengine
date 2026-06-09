@@ -10,6 +10,7 @@ import type {
 } from "@/lib/metrics/types";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { stripInlineMarkdown } from "@/lib/text/strip-markdown";
 
 type TopInsightsWidgetProps = {
   data: TopInsights;
@@ -245,7 +246,7 @@ function NarrativeBlock({
           isHero ? "text-white" : "text-foreground",
         )}
       >
-        {narrative.explanation}
+        {stripInlineMarkdown(narrative.explanation)}
       </p>
       <div className="space-y-1.5">
         <p
@@ -262,7 +263,7 @@ function NarrativeBlock({
             isHero ? "text-white/90" : "text-foreground/85",
           )}
         >
-          {narrative.rootCause}
+          {stripInlineMarkdown(narrative.rootCause)}
         </p>
       </div>
       {narrative.recommendations.length > 0 && (
@@ -290,7 +291,7 @@ function NarrativeBlock({
                 >
                   →
                 </span>
-                <span>{rec}</span>
+                <span>{stripInlineMarkdown(rec)}</span>
               </li>
             ))}
           </ul>

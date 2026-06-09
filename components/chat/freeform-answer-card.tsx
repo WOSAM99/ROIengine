@@ -1,5 +1,6 @@
 import { Info, KeyRound, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { stripInlineMarkdown } from "@/lib/text/strip-markdown";
 
 type FreeformAnswerCardProps = {
   question: string;
@@ -37,7 +38,7 @@ export function FreeformAnswerCard({
               AI narration
             </div>
             <p className="relative mt-3 text-sm leading-relaxed break-words whitespace-pre-wrap">
-              {narrative}
+              {stripInlineMarkdown(narrative)}
             </p>
           </div>
         ) : (
