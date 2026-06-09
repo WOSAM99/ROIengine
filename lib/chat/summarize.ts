@@ -20,7 +20,8 @@ const STRICT_RULES = `STRICT RULES:
 5. Keep total output under 120 words. Use 1–2 short paragraphs or a compact bulleted list.
 6. End with one concrete next-step suggestion framed as a question the user could act on.
 7. If the JSON shows no issues (e.g. no unprofitable jobs, no drags), say so plainly and stop.
-8. No preamble like "Here is a summary". Start with the fact.`;
+8. No preamble like "Here is a summary". Start with the fact.
+9. Output plain text only. Do NOT use markdown: no asterisks (* or **), no underscores for emphasis, no backticks, no # headings, no markdown bullet markers ("-" or "*"). Write plain sentences; if you list items, put each on its own line as plain text. The frontend handles all formatting.`;
 
 const CANNED_SYSTEM_PROMPT = `You are the narration layer of an ROI dashboard for field-services companies (water/mold/fire/reconstruction/cleaning jobs).
 

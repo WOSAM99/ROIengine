@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { StatsResult } from "@/lib/chat/stats";
 import { formatInt, formatMoney, formatPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { stripInlineMarkdown } from "@/lib/text/strip-markdown";
 import { KpiTile } from "@/components/widgets/kpi-tile";
 
 type AnswerCardProps = {
@@ -58,7 +59,7 @@ function NarrativeBlock({
           AI narration
         </div>
         <p className="relative mt-3 text-sm leading-relaxed break-words whitespace-pre-wrap">
-          {narrative}
+          {stripInlineMarkdown(narrative)}
         </p>
       </div>
     );

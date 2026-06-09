@@ -54,6 +54,7 @@ Severity drives the explanation's closing sentence:
 
 STRICT RULES:
 - Output MUST be valid JSON, no markdown, no code fences, no trailing commentary.
+- Every text field (explanation, rootCause, each recommendation) MUST be plain prose. Do NOT use markdown inside the strings: no asterisks (* or **), no underscores for emphasis, no backticks, no # headings, no leading "-" or "*" bullet markers. The frontend handles all formatting.
 - Do NOT invent numbers — use only what appears in the input.
 - Use $ for all dollar amounts. No "consider", no "analyse", no "look into".
 - If input text uses £, keep £.
